@@ -32,6 +32,26 @@ zonemd_pack(ldns_rdf * owner, uint32_t ttl, uint32_t serial, uint8_t digest_type
 }
 
 void
+zonemd_update_digest(ldns_rr * rr, uint8_t digest_type, unsigned char *digest_buf, unsigned int digest_len)
+{
+	uint8_t rr_digest_type = 0;
+	ldns_rdf *rdf = 0;
+	unsigned char *buf = 0;
+
+	rdf = ldns_rr_pop_rdf(rr);
+	assert(rdf);
+	buf = ldns_rdf_data(rdf);
+	assert(buf);
+
+	memcpy(&rr_digest_type, &buf[4], 1);
+	if (rr_digest_type != digest_type)
+		errx(1, "zonemd_update_digest mismatched digest type");
+
+	memcpy(&buf[5], digest_buf, digest_len);
+	ldns_rr_push_rdf(rr, rdf);
+}
+
+void
 zonemd_print(FILE * fp, ldns_rr * rr)
 {
 	ldns_rr_print(fp, rr);
@@ -52,12 +72,14 @@ zonemd_read_zone(const char *origin_str, FILE * fp, uint32_t ttl, ldns_rr_class 
 		errx(1, "ldns_zone_new_frm_fp: %s", ldns_get_errorstr_by_id(status));
 	if (!ldns_zone_soa(zone))
 		errx(1, "No SOA record in zone");
+	/* ldns_zone_rrs() doesn't give us the SOA, we add it here */
+	ldns_rr_list_push_rr(ldns_zone_rrs(zone), ldns_zone_soa(zone));
 	fprintf(stderr, "%s\n", ldns_get_errorstr_by_id(status));
-	fprintf(stderr, "%d records\n", ldns_rr_list_rr_count(ldns_zone_rrs(zone)));
+	fprintf(stderr, "%zu records\n", ldns_rr_list_rr_count(ldns_zone_rrs(zone)));
 	return zone;
 }
 
-void
+ldns_rr *
 zonemd_add_placeholder(ldns_zone * zone, uint8_t digest_type, unsigned int digest_len)
 {
 	unsigned int i;
@@ -97,6 +119,7 @@ zonemd_add_placeholder(ldns_zone * zone, uint8_t digest_type, unsigned int diges
 
 	ldns_zone_set_rrs(zone, output_rrlist);
 	fprintf(stderr, "Done\n");
+	return zonemd;
 }
 
 void
@@ -105,10 +128,6 @@ zonemd_calc_digest(ldns_zone * zone, digest_init_t *init, digest_update_t *updat
 	ldns_rr_list *rrlist = 0;
 	ldns_status status;
 	unsigned int i;
-
-	/* ldns_zone_rrs() doesn't give us the SOA, we add it here */
-	rrlist = ldns_zone_rrs(zone);
-	ldns_rr_list_push_rr(rrlist, ldns_zone_soa(zone));
 
 	fprintf(stderr, "Sorting Zone...");
 	ldns_zone_sort(zone);
@@ -148,19 +167,18 @@ zonemd_write_zone(ldns_zone * zone, FILE * fp)
 	unsigned int i;
 
 	assert(rrlist);
-	ldns_rr_print(fp, ldns_zone_soa(zone));
 	for (i = 0; i < ldns_rr_list_rr_count(rrlist); i++) {
 		ldns_rr *rr = ldns_rr_list_rr(rrlist, i);
 		if (rr)
 			ldns_rr_print(fp, rr);
 	}
-	ldns_rr_print(fp, ldns_zone_soa(zone));
 }
 
 int
 main(int argc, char *argv[])
 {
 	ldns_zone *theZone = 0;
+	ldns_rr *zonemd_rr = 0;
 	int ch;
 	const char *origin_str = 0;
 	const char *digest = 0;
@@ -237,9 +255,11 @@ main(int argc, char *argv[])
 
 	theZone = zonemd_read_zone(origin_str, stdin, 0, LDNS_RR_CLASS_IN);
 	if (placeholder)
-		zonemd_add_placeholder(theZone, digest_type, digest_len);
+		zonemd_rr = zonemd_add_placeholder(theZone, digest_type, digest_len);
 	if (calculate) {
 		zonemd_calc_digest(theZone, digest_init, digest_update, digest_final, digest_ctx, digest_buf, digest_len);
+		if (zonemd_rr)
+			zonemd_update_digest(zonemd_rr, digest_type, digest_buf, digest_len);
 	}
 	zonemd_write_zone(theZone, stdout);
 
