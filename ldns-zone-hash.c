@@ -7,8 +7,8 @@
 #include <getopt.h>
 
 typedef int (digest_init_t) (void *);
-typedef int (digest_update_t) (SHA256_CTX *, const void *, size_t);
-typedef int (digest_final_t) (unsigned char *, SHA256_CTX *);
+typedef int (digest_update_t) (void *, const void *, size_t);
+typedef int (digest_final_t) (unsigned char *, void *);
 
 const ldns_rr_type LDNS_RR_TYPE_ZONEMD = 65317;
 
@@ -50,12 +50,15 @@ zonemd_read_zone(const char *origin_str, FILE * fp, uint32_t ttl, ldns_rr_class 
 	status = ldns_zone_new_frm_fp(&zone, fp, origin, ttl, class);
 	if (status != LDNS_STATUS_OK)
 		errx(1, "ldns_zone_new_frm_fp: %s", ldns_get_errorstr_by_id(status));
+	if (!ldns_zone_soa(zone))
+		errx(1, "No SOA record in zone");
 	fprintf(stderr, "%s\n", ldns_get_errorstr_by_id(status));
+	fprintf(stderr, "%d records\n", ldns_rr_list_rr_count(ldns_zone_rrs(zone)));
 	return zone;
 }
 
 void
-zonemd_add_placeholder(ldns_zone * zone, ldns_hash digest_type, unsigned int digest_len)
+zonemd_add_placeholder(ldns_zone * zone, uint8_t digest_type, unsigned int digest_len)
 {
 	unsigned int i;
 	unsigned char *digest_buf = 0;
@@ -83,9 +86,7 @@ zonemd_add_placeholder(ldns_zone * zone, ldns_hash digest_type, unsigned int dig
 	ldns_rr_list_deep_free(tbd_rrlist);
 
 	soa = ldns_zone_soa(zone);
-	assert(soa);
 	soa_serial_rdf = ldns_rr_rdf(soa, 2);
-	assert(soa_serial_rdf);
 	soa_serial = ldns_rdf2native_int32(soa_serial_rdf);
 
 	digest_buf = calloc(1, digest_len);
@@ -98,16 +99,16 @@ zonemd_add_placeholder(ldns_zone * zone, ldns_hash digest_type, unsigned int dig
 	fprintf(stderr, "Done\n");
 }
 
-typedef int (digest_init) (void *);
-typedef int (digest_update) (SHA256_CTX *, const void *, size_t);
-typedef int (digest_final) (unsigned char *, SHA256_CTX *);
-
 void
 zonemd_calc_digest(ldns_zone * zone, digest_init_t *init, digest_update_t *update, digest_final_t *final, void *ctx, unsigned char *buf, unsigned int len)
 {
 	ldns_rr_list *rrlist = 0;
 	ldns_status status;
 	unsigned int i;
+
+	/* ldns_zone_rrs() doesn't give us the SOA, we add it here */
+	rrlist = ldns_zone_rrs(zone);
+	ldns_rr_list_push_rr(rrlist, ldns_zone_soa(zone));
 
 	fprintf(stderr, "Sorting Zone...");
 	ldns_zone_sort(zone);
@@ -145,12 +146,15 @@ zonemd_write_zone(ldns_zone * zone, FILE * fp)
 {
 	ldns_rr_list *rrlist = ldns_zone_rrs(zone);
 	unsigned int i;
+
 	assert(rrlist);
+	ldns_rr_print(fp, ldns_zone_soa(zone));
 	for (i = 0; i < ldns_rr_list_rr_count(rrlist); i++) {
 		ldns_rr *rr = ldns_rr_list_rr(rrlist, i);
 		if (rr)
 			ldns_rr_print(fp, rr);
 	}
+	ldns_rr_print(fp, ldns_zone_soa(zone));
 }
 
 int
@@ -163,6 +167,7 @@ main(int argc, char *argv[])
 	int placeholder = 0;
 	int calculate = 0;
 	int verify = 0;
+	uint8_t digest_type = 0;
 	digest_init_t *digest_init = 0;
 	digest_update_t *digest_update = 0;
 	digest_final_t *digest_final = 0;
@@ -202,12 +207,29 @@ main(int argc, char *argv[])
 	if (!digest)
 		errx(1, "Option --digest type is required");
 
-	if (0 == strcasecmp(digest, "sha256")) {
+	if (0 == strcasecmp(digest, "sha1")) {
+		digest_type = 1;
+		digest_init = (digest_init_t *) SHA1_Init;
+		digest_update = (digest_update_t *) SHA1_Update;
+		digest_final = (digest_final_t *) SHA1_Final;
+		digest_ctx = calloc(1, sizeof(SHA_CTX));
+		digest_len = SHA_DIGEST_LENGTH;
+		digest_buf = calloc(1, digest_len);
+	} else if (0 == strcasecmp(digest, "sha256")) {
+		digest_type = 2;
 		digest_init = (digest_init_t *) SHA256_Init;
-		digest_update = SHA256_Update;
-		digest_final = SHA256_Final;
+		digest_update = (digest_update_t *) SHA256_Update;
+		digest_final = (digest_final_t *) SHA256_Final;
 		digest_ctx = calloc(1, sizeof(SHA256_CTX));
 		digest_len = SHA256_DIGEST_LENGTH;
+		digest_buf = calloc(1, digest_len);
+	} else if (0 == strcasecmp(digest, "sha384")) {
+		digest_type = 4;
+		digest_init = (digest_init_t *) SHA384_Init;
+		digest_update = (digest_update_t *) SHA384_Update;
+		digest_final = (digest_final_t *) SHA384_Final;
+		digest_ctx = calloc(1, sizeof(SHA512_CTX));
+		digest_len = SHA384_DIGEST_LENGTH;
 		digest_buf = calloc(1, digest_len);
 	} else {
 		errx(1, "Unsupported digest type '%s'", digest);
@@ -215,7 +237,7 @@ main(int argc, char *argv[])
 
 	theZone = zonemd_read_zone(origin_str, stdin, 0, LDNS_RR_CLASS_IN);
 	if (placeholder)
-		zonemd_add_placeholder(theZone, LDNS_SHA256, SHA256_DIGEST_LENGTH);
+		zonemd_add_placeholder(theZone, digest_type, digest_len);
 	if (calculate) {
 		zonemd_calc_digest(theZone, digest_init, digest_update, digest_final, digest_ctx, digest_buf, digest_len);
 	}
