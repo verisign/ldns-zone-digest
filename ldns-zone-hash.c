@@ -31,6 +31,34 @@ zonemd_pack(ldns_rdf * owner, uint32_t ttl, uint32_t serial, uint8_t digest_type
 	return rr;
 }
 
+ldns_rr *
+zonemd_find(ldns_zone *zone, uint8_t that_digest_type)
+{
+	ldns_rr *rr = 0;
+	ldns_rr_list *rrlist;
+	unsigned int i;
+	rrlist = ldns_zone_rrs(zone);
+	for (i = 0; i < ldns_rr_list_rr_count(rrlist); i++) {
+		ldns_rdf *rdf;
+		uint8_t this_digest_type;
+		unsigned char *buf;
+		rr = ldns_rr_list_rr(rrlist, i);
+		if (ldns_rr_get_type(rr) != LDNS_RR_TYPE_ZONEMD)
+			continue;
+		rdf = ldns_rr_rdf(rr, 0);
+		assert(rdf);
+		if (ldns_rdf_size(rdf) < 5)
+			continue;
+		buf = ldns_rdf_data(rdf);
+		assert(buf);
+		memcpy(&this_digest_type, &buf[4], 1);
+		if (this_digest_type != that_digest_type)
+			continue;
+		break;
+	}
+	return rr;
+}
+
 void
 zonemd_update_digest(ldns_rr * rr, uint8_t digest_type, unsigned char *digest_buf, unsigned int digest_len)
 {
@@ -79,7 +107,7 @@ zonemd_read_zone(const char *origin_str, FILE * fp, uint32_t ttl, ldns_rr_class 
 	return zone;
 }
 
-ldns_rr *
+void
 zonemd_add_placeholder(ldns_zone * zone, uint8_t digest_type, unsigned int digest_len)
 {
 	unsigned int i;
@@ -119,7 +147,6 @@ zonemd_add_placeholder(ldns_zone * zone, uint8_t digest_type, unsigned int diges
 
 	ldns_zone_set_rrs(zone, output_rrlist);
 	fprintf(stderr, "Done\n");
-	return zonemd;
 }
 
 void
@@ -189,7 +216,6 @@ int
 main(int argc, char *argv[])
 {
 	ldns_zone *theZone = 0;
-	ldns_rr *zonemd_rr = 0;
 	int ch;
 	FILE *input = stdin;
 	const char *progname = 0;
@@ -269,8 +295,9 @@ main(int argc, char *argv[])
 
 	theZone = zonemd_read_zone(origin_str, input, 0, LDNS_RR_CLASS_IN);
 	if (placeholder)
-		zonemd_rr = zonemd_add_placeholder(theZone, digest_type, digest_len);
+		zonemd_add_placeholder(theZone, digest_type, digest_len);
 	if (calculate) {
+		ldns_rr *zonemd_rr = zonemd_find(theZone, digest_type);
 		zonemd_calc_digest(theZone, digest_init, digest_update, digest_final, digest_ctx, digest_buf, digest_len);
 		if (zonemd_rr)
 			zonemd_update_digest(zonemd_rr, digest_type, digest_buf, digest_len);
