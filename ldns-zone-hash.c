@@ -221,6 +221,7 @@ main(int argc, char *argv[])
 	const char *progname = 0;
 	const char *origin_str = 0;
 	const char *digest = "sha256";
+	const char *zsk_fname = 0;
 	int placeholder = 0;
 	int calculate = 0;
 	int verify = 0;
@@ -236,7 +237,7 @@ main(int argc, char *argv[])
 	if (0 == progname)
 		progname = argv[0];
 
-	while ((ch = getopt(argc, argv, "cpvd:")) != -1) {
+	while ((ch = getopt(argc, argv, "cpvd:z:")) != -1) {
 		switch (ch) {
 		case 'c':
 			calculate = 1;
@@ -249,6 +250,9 @@ main(int argc, char *argv[])
 			break;
 		case 'd':
 			digest = strdup(optarg);
+			break;
+		case 'z':
+			zsk_fname = strdup(optarg);
 			break;
 		default:
 			usage(progname);
@@ -299,8 +303,12 @@ main(int argc, char *argv[])
 	if (calculate) {
 		ldns_rr *zonemd_rr = zonemd_find(theZone, digest_type);
 		zonemd_calc_digest(theZone, digest_init, digest_update, digest_final, digest_ctx, digest_buf, digest_len);
-		if (zonemd_rr)
+		if (zonemd_rr) {
 			zonemd_update_digest(zonemd_rr, digest_type, digest_buf, digest_len);
+			//zonemd_resign()
+		}
+	}
+	if (verify) {
 	}
 	zonemd_write_zone(theZone, stdout);
 
