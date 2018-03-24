@@ -174,14 +174,27 @@ zonemd_write_zone(ldns_zone * zone, FILE * fp)
 	}
 }
 
+void
+usage(const char *p)
+{
+	fprintf(stderr, "usage: %s [options] origin [zonefile]\n", p);
+	fprintf(stderr, "\t-c\t\tcalculate the zone digest\n");
+	fprintf(stderr, "\t-p\t\tinsert placeholder record\n");
+	fprintf(stderr, "\t-v\t\tverify the zone digest\n");
+	fprintf(stderr, "\t-d type\t\tdigest type (sha1, sha256, sha384)\n");
+	exit(2);
+}
+
 int
 main(int argc, char *argv[])
 {
 	ldns_zone *theZone = 0;
 	ldns_rr *zonemd_rr = 0;
 	int ch;
+	FILE *input = stdin;
+	const char *progname = 0;
 	const char *origin_str = 0;
-	const char *digest = 0;
+	const char *digest = "sha256";
 	int placeholder = 0;
 	int calculate = 0;
 	int verify = 0;
@@ -193,37 +206,38 @@ main(int argc, char *argv[])
 	unsigned char *digest_buf = 0;
 	unsigned int digest_len = 0;
 
-	/* options descriptor */
-	struct option longopts[] = {
-		{"origin", required_argument, NULL, 'o'},
-		{"digest", required_argument, NULL, 'd'},
-		{"placeholder", no_argument, &placeholder, 1},
-		{"calculate", no_argument, &calculate, 1},
-		{"verify", no_argument, &verify, 1},
-		{NULL, 0, NULL, 0}
-	};
+	progname = strrchr(argv[0], '/');
+	if (0 == progname)
+		progname = argv[0];
 
-	while ((ch = getopt_long(argc, argv, "", longopts, NULL)) != -1) {
+	while ((ch = getopt(argc, argv, "cpvd:")) != -1) {
 		switch (ch) {
-		case 'o':
-			origin_str = strdup(optarg);
+		case 'c':
+			calculate = 1;
+			break;
+		case 'p':
+			placeholder = 1;
+			break;
+		case 'v':
+			verify = 1;
 			break;
 		case 'd':
 			digest = strdup(optarg);
 			break;
-		case 0:
-			break;
 		default:
-			errx(1, "usage: %s --origin name --digest type [--placeholder | --calculate | --verify]", argv[0]);
+			usage(progname);
 		}
 	}
 	argc -= optind;
 	argv += optind;
-
-	if (!origin_str)
-		errx(1, "Option --origin name is required");
-	if (!digest)
-		errx(1, "Option --digest type is required");
+	if (argc < 1 || argc > 2)
+		usage(progname);
+	origin_str = strdup(argv[0]);
+	if (argc == 2) {
+		input = fopen(argv[1], "r");
+		if (0 == input)
+			err(1, argv[1]);
+	}
 
 	if (0 == strcasecmp(digest, "sha1")) {
 		digest_type = 1;
@@ -253,7 +267,7 @@ main(int argc, char *argv[])
 		errx(1, "Unsupported digest type '%s'", digest);
 	}
 
-	theZone = zonemd_read_zone(origin_str, stdin, 0, LDNS_RR_CLASS_IN);
+	theZone = zonemd_read_zone(origin_str, input, 0, LDNS_RR_CLASS_IN);
 	if (placeholder)
 		zonemd_rr = zonemd_add_placeholder(theZone, digest_type, digest_len);
 	if (calculate) {
