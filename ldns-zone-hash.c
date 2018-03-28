@@ -223,12 +223,7 @@ zonemd_calc_digest(ldns_zone * zone, digest_init_t *init, digest_update_t *updat
 	}
 	if (!final(buf, ctx))
 		errx(1, "%s(%d): Digest final failed", __FILE__, __LINE__);
-	fprintf(stderr, "%s\n", "Done");
-
-	for (i = 0; i < len; i++) {
-		fprintf(stderr, "%02x", buf[i]);
-	}
-	fprintf(stderr, "\n");
+	fprintf(stderr, "%s\n", "Done\n");
 }
 
 void
@@ -282,6 +277,19 @@ zonemd_write_zone(ldns_zone * zone, FILE * fp)
 		if (rr)
 			ldns_rr_print(fp, rr);
 	}
+}
+
+void
+zonemd_print_digest(FILE *fp, const char *preamble, const unsigned char *buf, unsigned int len, const char *postamble)
+{
+	unsigned int i;
+	if (preamble)
+		fputs(preamble, fp);
+	for (i = 0; i < len; i++) {
+		fprintf(fp, "%02x", buf[i]);
+	}
+	if (postamble)
+		fputs(postamble, fp);
 }
 
 typedef struct {
@@ -410,13 +418,28 @@ main(int argc, char *argv[])
 			errx(1, "%s(%d): No %s record found in zone.  Use -p to add one.", __FILE__, __LINE__, RRNAME);
 		d = zonemd_digester(found_digest_type);
 		zonemd_calc_digest(theZone, d->init, d->update, d->final, d->ctx, d->buf, d->len);
-		if (zonemd_rr)
-			zonemd_update_digest(zonemd_rr, d->type, d->buf, d->len);
-		if (zonemd_rr && zsk_fname)
+		zonemd_update_digest(zonemd_rr, d->type, d->buf, d->len);
+		if (zsk_fname)
 			zonemd_resign(zonemd_rr, zsk_fname, theZone);
 		zonemd_digester_free(d);
 	}
 	if (verify) {
+		uint8_t found_digest_type;
+		unsigned char found_digest_buf[512];
+		digester *d = 0;
+		ldns_rr *zonemd_rr = zonemd_find(theZone, 0, &found_digest_type, found_digest_buf, sizeof(found_digest_buf));
+		if (!zonemd_rr)
+			errx(1, "%s(%d): No %s record found in zone, cannot verify.", __FILE__, __LINE__, RRNAME);
+		d = zonemd_digester(found_digest_type);
+		assert(d->len <= sizeof(found_digest_buf));
+	
+		zonemd_print_digest(stderr, "Found in Zone: ", found_digest_buf, d->len, "\n");
+		/* NOTE d->type is zeroed by zonemd_digester() */
+		zonemd_update_digest(zonemd_rr, d->type, d->buf, d->len);
+		zonemd_calc_digest(theZone, d->init, d->update, d->final, d->ctx, d->buf, d->len);
+		zonemd_print_digest(stderr, "Calculated   : ", d->buf, d->len, "\n");
+		
+		zonemd_digester_free(d);
 	}
 	zonemd_write_zone(theZone, stdout);
 
