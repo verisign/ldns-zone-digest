@@ -266,7 +266,7 @@ main(int argc, char *argv[])
 	if (argc == 2) {
 		input = fopen(argv[1], "r");
 		if (0 == input)
-			err(1, argv[1]);
+			err(1, "%s", argv[1]);
 	}
 
 	if (0 == strcasecmp(digest, "sha1")) {
