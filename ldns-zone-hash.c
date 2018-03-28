@@ -30,6 +30,7 @@ zonemd_pack(ldns_rdf * owner, uint32_t ttl, uint32_t serial, uint8_t digest_type
 	ldns_rr_set_ttl(rr, ttl);
 	ldns_rr_set_type(rr, LDNS_RR_TYPE_ZONEMD);
 	ldns_rr_push_rdf(rr, rdf);
+	free(buf);
 	return rr;
 }
 
@@ -107,7 +108,7 @@ zonemd_read_zone(const char *origin_str, FILE * fp, uint32_t ttl, ldns_rr_class 
 	 * ldns_zone_new_frm_fp() doesn't put the SOA into the rr
 	 * list, but if we add it here it sticks around.
 	 */
-	ldns_rr_list_push_rr(ldns_zone_rrs(zone), ldns_zone_soa(zone));
+	ldns_rr_list_push_rr(ldns_zone_rrs(zone), ldns_rr_clone(ldns_zone_soa(zone)));
 	fprintf(stderr, "%s\n", ldns_get_errorstr_by_id(status));
 	fprintf(stderr, "%zu records\n", ldns_rr_list_rr_count(ldns_zone_rrs(zone)));
 	return zone;
@@ -175,6 +176,7 @@ zonemd_add_placeholder(ldns_zone * zone, uint8_t digest_type, unsigned int diges
 	free(digest_buf);
 	ldns_rr_list_push_rr(rrlist, zonemd);
 
+	ldns_rr_list_free(ldns_zone_rrs(zone));
 	ldns_zone_set_rrs(zone, rrlist);
 	fprintf(stderr, "Done\n");
 }
@@ -255,7 +257,11 @@ zonemd_resign(ldns_rr * rr, const char *zsk_fname, ldns_zone *zone)
 	rrlist = zonemd_filter_rr_list(ldns_zone_rrs(zone), LDNS_RR_TYPE_RRSIG, LDNS_RR_TYPE_ZONEMD);
 	assert(rrlist);
 	ldns_rr_list_push_rr_list(rrlist, rrsig);
+	ldns_rr_list_free(ldns_zone_rrs(zone));
 	ldns_zone_set_rrs(zone, rrlist);
+	ldns_key_list_free(keys);
+	ldns_rr_list_free(rrsig);
+	ldns_rr_list_free(rrset);
 }
 
 void
@@ -290,9 +296,9 @@ main(int argc, char *argv[])
 	int ch;
 	FILE *input = stdin;
 	const char *progname = 0;
-	const char *origin_str = 0;
+	char *origin_str = 0;
 	const char *digest = "sha256";
-	const char *zsk_fname = 0;
+	char *zsk_fname = 0;
 	int placeholder = 0;
 	int calculate = 0;
 	int verify = 0;
@@ -384,6 +390,16 @@ main(int argc, char *argv[])
 	if (verify) {
 	}
 	zonemd_write_zone(theZone, stdout);
+
+	if (digest_ctx)
+		free(digest_ctx);
+	if (digest_buf)
+		free(digest_buf);
+	if (zsk_fname)
+		free(zsk_fname);
+	if (origin_str)
+		free(origin_str);
+	ldns_zone_deep_free(theZone);
 
 	return 0;
 }
