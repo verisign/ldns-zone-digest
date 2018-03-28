@@ -170,6 +170,15 @@ zonemd_calc_digest(ldns_zone * zone, digest_init_t *init, digest_update_t *updat
 		uint8_t *buf;
 		size_t sz;
 		ldns_rr *rr = ldns_rr_list_rr(rrlist, i);
+		if (ldns_rr_get_type(rr) == LDNS_RR_TYPE_RRSIG) {
+			ldns_rdf *rdf;
+			ldns_rr_type covered;
+			rdf = ldns_rr_rrsig_typecovered(rr);
+			assert(rdf);
+			covered = ldns_rdf2native_int16(rdf);
+			if (covered == LDNS_RR_TYPE_ZONEMD)
+				continue;
+		}
 		status = ldns_rr2wire(&buf, rr, LDNS_SECTION_ANSWER, &sz);
 		if (status != LDNS_STATUS_OK)
 			errx(1, "ldns_rr2wire() failed");
