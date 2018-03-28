@@ -12,6 +12,7 @@ typedef int (digest_final_t) (unsigned char *, void *);
 
 const ldns_rr_type LDNS_RR_TYPE_ZONEMD = 65317;
 const char *RRNAME = "ZONEMD";
+static ldns_rdf *origin = 0;
 
 ldns_rr *
 zonemd_pack(ldns_rdf * owner, uint32_t ttl, uint32_t serial, uint8_t digest_type, void *digest, size_t digest_sz)
@@ -92,7 +93,6 @@ ldns_zone *
 zonemd_read_zone(const char *origin_str, FILE * fp, uint32_t ttl, ldns_rr_class class)
 {
 	ldns_zone *zone = 0;
-	ldns_rdf *origin = 0;
 	ldns_status status;
 
 	fprintf(stderr, "Loading Zone...");
@@ -103,40 +103,67 @@ zonemd_read_zone(const char *origin_str, FILE * fp, uint32_t ttl, ldns_rr_class 
 		errx(1, "ldns_zone_new_frm_fp: %s", ldns_get_errorstr_by_id(status));
 	if (!ldns_zone_soa(zone))
 		errx(1, "No SOA record in zone");
-	/* ldns_zone_rrs() doesn't give us the SOA, we add it here */
+	/*
+	 * ldns_zone_new_frm_fp() doesn't put the SOA into the rr
+	 * list, but if we add it here it sticks around.
+	 */
 	ldns_rr_list_push_rr(ldns_zone_rrs(zone), ldns_zone_soa(zone));
 	fprintf(stderr, "%s\n", ldns_get_errorstr_by_id(status));
 	fprintf(stderr, "%zu records\n", ldns_rr_list_rr_count(ldns_zone_rrs(zone)));
 	return zone;
 }
 
+ldns_rr_type
+my_typecovered(ldns_rr *rrsig)
+{
+	ldns_rdf *rdf = ldns_rr_rrsig_typecovered(rrsig);
+	assert(rdf);
+	return ldns_rdf2native_int16(rdf);
+}
+
+/*
+ * Filter out RRs of type 'type' from the input.  If 'type' is RRISG then
+ * only signatures of type 'covered' are filtered.
+ */
+ldns_rr_list *
+zonemd_filter_rr_list(ldns_rr_list *input, ldns_rr_type type, ldns_rr_type covered)
+{
+	unsigned int i;
+	ldns_rr_list *output = 0;
+	ldns_rr_list *tbd = 0;
+
+	output = ldns_rr_list_new();
+	tbd = ldns_rr_list_new();
+	assert(output);
+	assert(tbd);
+
+	for (i = 0; i < ldns_rr_list_rr_count(input); i++) {
+		ldns_rr *rr = ldns_rr_list_rr(input, i);
+		if (ldns_rr_get_type(rr) != type) {
+			ldns_rr_list_push_rr(output, rr);
+		} else if (type == LDNS_RR_TYPE_RRSIG && my_typecovered(rr) != covered) {
+			ldns_rr_list_push_rr(output, rr);
+		} else {
+			ldns_rr_list_push_rr(tbd, rr);
+		}
+	}
+	ldns_rr_list_deep_free(tbd);
+
+	return output;
+}
+
 void
 zonemd_add_placeholder(ldns_zone * zone, uint8_t digest_type, unsigned int digest_len)
 {
-	unsigned int i;
 	unsigned char *digest_buf = 0;
-	ldns_rr_list *input_rrlist = 0;
-	ldns_rr_list *output_rrlist = 0;
-	ldns_rr_list *tbd_rrlist = 0;
+	ldns_rr_list *rrlist = 0;
 	ldns_rr *soa = 0;
 	ldns_rdf *soa_serial_rdf = 0;
 	uint32_t soa_serial;
 	ldns_rr *zonemd = 0;
 
 	fprintf(stderr, "Remove existing ZONEMD...");
-	input_rrlist = ldns_zone_rrs(zone);
-	output_rrlist = ldns_rr_list_new();
-	tbd_rrlist = ldns_rr_list_new();
-
-	for (i = 0; i < ldns_rr_list_rr_count(input_rrlist); i++) {
-		ldns_rr *rr = ldns_rr_list_rr(input_rrlist, i);
-		if (ldns_rr_get_type(rr) == LDNS_RR_TYPE_ZONEMD) {
-			ldns_rr_list_push_rr(tbd_rrlist, rr);
-		} else {
-			ldns_rr_list_push_rr(output_rrlist, rr);
-		}
-	}
-	ldns_rr_list_deep_free(tbd_rrlist);
+	rrlist = zonemd_filter_rr_list(ldns_zone_rrs(zone), LDNS_RR_TYPE_ZONEMD, 0);
 
 	soa = ldns_zone_soa(zone);
 	soa_serial_rdf = ldns_rr_rdf(soa, 2);
@@ -146,9 +173,9 @@ zonemd_add_placeholder(ldns_zone * zone, uint8_t digest_type, unsigned int diges
 	assert(digest_buf);
 	zonemd = zonemd_pack(ldns_rr_owner(soa), ldns_rr_ttl(soa), soa_serial, digest_type, digest_buf, digest_len);
 	free(digest_buf);
-	ldns_rr_list_push_rr(output_rrlist, zonemd);
+	ldns_rr_list_push_rr(rrlist, zonemd);
 
-	ldns_zone_set_rrs(zone, output_rrlist);
+	ldns_zone_set_rrs(zone, rrlist);
 	fprintf(stderr, "Done\n");
 }
 
@@ -176,15 +203,9 @@ zonemd_calc_digest(ldns_zone * zone, digest_init_t *init, digest_update_t *updat
 		uint8_t *buf;
 		size_t sz;
 		ldns_rr *rr = ldns_rr_list_rr(rrlist, i);
-		if (ldns_rr_get_type(rr) == LDNS_RR_TYPE_RRSIG) {
-			ldns_rdf *rdf;
-			ldns_rr_type covered;
-			rdf = ldns_rr_rrsig_typecovered(rr);
-			assert(rdf);
-			covered = ldns_rdf2native_int16(rdf);
-			if (covered == LDNS_RR_TYPE_ZONEMD)
+		if (ldns_rr_get_type(rr) == LDNS_RR_TYPE_RRSIG)
+			if (my_typecovered(rr) == LDNS_RR_TYPE_ZONEMD)
 				continue;
-		}
 		status = ldns_rr2wire(&buf, rr, LDNS_SECTION_ANSWER, &sz);
 		if (status != LDNS_STATUS_OK)
 			errx(1, "ldns_rr2wire() failed");
@@ -200,6 +221,41 @@ zonemd_calc_digest(ldns_zone * zone, digest_init_t *init, digest_update_t *updat
 		fprintf(stderr, "%02x", buf[i]);
 	}
 	fprintf(stderr, "\n");
+}
+
+void
+zonemd_resign(ldns_rr * rr, const char *zsk_fname, ldns_zone *zone)
+{
+	FILE *fp = 0;
+	ldns_key *zsk = 0;
+	ldns_key_list *keys = 0;
+	ldns_status status;
+	ldns_rr_list *rrset = 0;
+	ldns_rr_list *rrsig = 0;
+	ldns_rr_list *rrlist = 0;
+
+	fp = fopen(zsk_fname, "r");
+	if (fp == 0)
+		err(1, "%s", zsk_fname);
+	status = ldns_key_new_frm_fp(&zsk, fp);
+	if (status != LDNS_STATUS_OK)
+		errx(1, "ldns_key_new_frm_fp: %s", ldns_get_errorstr_by_id(status));
+	ldns_key_set_pubkey_owner(zsk, origin);
+	keys = ldns_key_list_new();
+	assert(keys);
+	ldns_key_list_push_key(keys, zsk);
+
+	rrset = ldns_rr_list_new();
+	assert(rrset);
+	ldns_rr_list_push_rr(rrset, rr);
+	rrsig = ldns_sign_public(rrset, keys);
+	if (rrsig == 0)
+		errx(1, "ldns_sign_public() failed");
+
+	rrlist = zonemd_filter_rr_list(ldns_zone_rrs(zone), LDNS_RR_TYPE_RRSIG, LDNS_RR_TYPE_ZONEMD);
+	assert(rrlist);
+	ldns_rr_list_push_rr_list(rrlist, rrsig);
+	ldns_zone_set_rrs(zone, rrlist);
 }
 
 void
@@ -320,10 +376,10 @@ main(int argc, char *argv[])
 		if (!zonemd_rr)
 			errx(1, "No %s record found in zone.  Use -p to add one.", RRNAME);
 		zonemd_calc_digest(theZone, digest_init, digest_update, digest_final, digest_ctx, digest_buf, digest_len);
-		if (zonemd_rr) {
+		if (zonemd_rr)
 			zonemd_update_digest(zonemd_rr, digest_type, digest_buf, digest_len);
-			//zonemd_resign()
-		}
+		if (zonemd_rr && zsk_fname)
+			zonemd_resign(zonemd_rr, zsk_fname, theZone);
 	}
 	if (verify) {
 	}
