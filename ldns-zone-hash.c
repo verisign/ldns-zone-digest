@@ -11,6 +11,7 @@ typedef int (digest_update_t) (void *, const void *, size_t);
 typedef int (digest_final_t) (unsigned char *, void *);
 
 const ldns_rr_type LDNS_RR_TYPE_ZONEMD = 65317;
+const char *RRNAME = "ZONEMD";
 
 ldns_rr *
 zonemd_pack(ldns_rdf * owner, uint32_t ttl, uint32_t serial, uint8_t digest_type, void *digest, size_t digest_sz)
@@ -313,6 +314,8 @@ main(int argc, char *argv[])
 		zonemd_add_placeholder(theZone, digest_type, digest_len);
 	if (calculate) {
 		ldns_rr *zonemd_rr = zonemd_find(theZone, digest_type);
+		if (!zonemd_rr)
+			errx(1, "No %s record found in zone.  Use -p to add one.", RRNAME);
 		zonemd_calc_digest(theZone, digest_init, digest_update, digest_final, digest_ctx, digest_buf, digest_len);
 		if (zonemd_rr) {
 			zonemd_update_digest(zonemd_rr, digest_type, digest_buf, digest_len);
