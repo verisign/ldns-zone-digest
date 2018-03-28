@@ -160,6 +160,9 @@ zonemd_calc_digest(ldns_zone * zone, digest_init_t *init, digest_update_t *updat
 	unsigned int i;
 
 	fprintf(stderr, "Sorting Zone...");
+	/*
+	 * thankfully ldns_zone_sort() already sorts by RRtype for same owner name
+	 */
 	ldns_zone_sort(zone);
 	rrlist = ldns_zone_rrs(zone);
 	fprintf(stderr, "%s\n", "Done");
