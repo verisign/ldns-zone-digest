@@ -115,7 +115,6 @@ zonemd_read_zone(const char *origin_str, FILE * fp, uint32_t ttl, ldns_rr_class 
 	 * list, but if we add it here it sticks around.
 	 */
 	ldns_rr_list_push_rr(ldns_zone_rrs(zone), ldns_rr_clone(ldns_zone_soa(zone)));
-	fprintf(stderr, "%s\n", ldns_get_errorstr_by_id(status));
 	fprintf(stderr, "%zu records\n", ldns_rr_list_rr_count(ldns_zone_rrs(zone)));
 	return zone;
 }
@@ -223,7 +222,7 @@ zonemd_calc_digest(ldns_zone * zone, digest_init_t *init, digest_update_t *updat
 	}
 	if (!final(buf, ctx))
 		errx(1, "%s(%d): Digest final failed", __FILE__, __LINE__);
-	fprintf(stderr, "%s\n", "Done\n");
+	fprintf(stderr, "%s\n", "Done");
 }
 
 void
@@ -370,6 +369,7 @@ main(int argc, char *argv[])
 	int placeholder = 0;
 	int calculate = 0;
 	int verify = 0;
+	int rc = 0;
 
 	progname = strrchr(argv[0], '/');
 	if (0 == progname)
@@ -432,16 +432,21 @@ main(int argc, char *argv[])
 			errx(1, "%s(%d): No %s record found in zone, cannot verify.", __FILE__, __LINE__, RRNAME);
 		d = zonemd_digester(found_digest_type);
 		assert(d->len <= sizeof(found_digest_buf));
-	
-		zonemd_print_digest(stderr, "Found in Zone: ", found_digest_buf, d->len, "\n");
 		/* NOTE d->type is zeroed by zonemd_digester() */
 		zonemd_update_digest(zonemd_rr, d->type, d->buf, d->len);
 		zonemd_calc_digest(theZone, d->init, d->update, d->final, d->ctx, d->buf, d->len);
-		zonemd_print_digest(stderr, "Calculated   : ", d->buf, d->len, "\n");
-		
+		if (memcmp(found_digest_buf, d->buf, d->len) != 0) {
+			fprintf(stderr, "Found and calculated digests do NOT match.\n");
+			zonemd_print_digest(stderr, "Found     : ", found_digest_buf, d->len, "\n");
+			zonemd_print_digest(stderr, "Calculated: ", d->buf, d->len, "\n");
+			rc |= 1;
+		} else {
+			fprintf(stderr, "Found and calculated digests do MATCH.\n");
+		}
 		zonemd_digester_free(d);
 	}
-	zonemd_write_zone(theZone, stdout);
+	if (placeholder || calculate)
+		zonemd_write_zone(theZone, stdout);
 
 	if (zsk_fname)
 		free(zsk_fname);
@@ -449,5 +454,5 @@ main(int argc, char *argv[])
 		free(origin_str);
 	ldns_zone_deep_free(theZone);
 
-	return 0;
+	return rc;
 }
