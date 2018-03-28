@@ -284,16 +284,71 @@ zonemd_write_zone(ldns_zone * zone, FILE * fp)
 	}
 }
 
+typedef struct {
+	uint8_t type;
+	digest_init_t *init;
+	digest_update_t *update;
+	digest_final_t *final;
+	void *ctx;
+	unsigned char *buf;
+	unsigned int len;
+} digester;
+
+digester *
+zonemd_digester(uint8_t type)
+{
+	static digester D;
+	memset(&D, 0, sizeof(D));
+	if (type == 1) {
+		D.type = 1;
+		D.init = (digest_init_t *) SHA1_Init;
+		D.update = (digest_update_t *) SHA1_Update;
+		D.final = (digest_final_t *) SHA1_Final;
+		D.ctx = calloc(1, sizeof(SHA_CTX));
+		D.len = SHA_DIGEST_LENGTH;
+		D.buf = calloc(1, D.len);
+	} else if (type == 2) {
+		D.type = 2;
+		D.init = (digest_init_t *) SHA256_Init;
+		D.update = (digest_update_t *) SHA256_Update;
+		D.final = (digest_final_t *) SHA256_Final;
+		D.ctx = calloc(1, sizeof(SHA256_CTX));
+		D.len = SHA256_DIGEST_LENGTH;
+		D.buf = calloc(1, D.len);
+	} else if (type == 4) {
+		D.type = 4;
+		D.init = (digest_init_t *) SHA384_Init;
+		D.update = (digest_update_t *) SHA384_Update;
+		D.final = (digest_final_t *) SHA384_Final;
+		D.ctx = calloc(1, sizeof(SHA512_CTX));
+		D.len = SHA384_DIGEST_LENGTH;
+		D.buf = calloc(1, D.len);
+	} else {
+		errx(1, "%s(%d): Unsupported digest type %u", __FILE__, __LINE__, type);
+	}
+	return &D;
+}
+
+void
+zonemd_digester_free(digester *d)
+{
+	if (d && d->ctx)
+		free(d->ctx);
+	if (d && d->buf)
+		free(d->buf);
+}
+
 void
 usage(const char *p)
 {
 	fprintf(stderr, "usage: %s [options] origin [zonefile]\n", p);
 	fprintf(stderr, "\t-c\t\tcalculate the zone digest\n");
-	fprintf(stderr, "\t-p\t\tinsert placeholder record\n");
+	fprintf(stderr, "\t-p type\t\tinsert placeholder record of type (1, 2, 4)\n");
 	fprintf(stderr, "\t-v\t\tverify the zone digest\n");
-	fprintf(stderr, "\t-d type\t\tdigest type (sha1, sha256, sha384)\n");
 	exit(2);
 }
+
+
 
 int
 main(int argc, char *argv[])
@@ -303,36 +358,25 @@ main(int argc, char *argv[])
 	FILE *input = stdin;
 	const char *progname = 0;
 	char *origin_str = 0;
-	const char *digest = "sha256";
 	char *zsk_fname = 0;
 	int placeholder = 0;
 	int calculate = 0;
 	int verify = 0;
-	uint8_t digest_type = 0;
-	digest_init_t *digest_init = 0;
-	digest_update_t *digest_update = 0;
-	digest_final_t *digest_final = 0;
-	void *digest_ctx;
-	unsigned char *digest_buf = 0;
-	unsigned int digest_len = 0;
 
 	progname = strrchr(argv[0], '/');
 	if (0 == progname)
 		progname = argv[0];
 
-	while ((ch = getopt(argc, argv, "cpvd:z:")) != -1) {
+	while ((ch = getopt(argc, argv, "cp:vz:")) != -1) {
 		switch (ch) {
 		case 'c':
 			calculate = 1;
 			break;
 		case 'p':
-			placeholder = 1;
+			placeholder = strtoul(optarg, 0, 10);
 			break;
 		case 'v':
 			verify = 1;
-			break;
-		case 'd':
-			digest = strdup(optarg);
 			break;
 		case 'z':
 			zsk_fname = strdup(optarg);
@@ -352,56 +396,30 @@ main(int argc, char *argv[])
 			err(1, "%s(%d): %s", __FILE__, __LINE__, argv[1]);
 	}
 
-	if (0 == strcasecmp(digest, "sha1")) {
-		digest_type = 1;
-		digest_init = (digest_init_t *) SHA1_Init;
-		digest_update = (digest_update_t *) SHA1_Update;
-		digest_final = (digest_final_t *) SHA1_Final;
-		digest_ctx = calloc(1, sizeof(SHA_CTX));
-		digest_len = SHA_DIGEST_LENGTH;
-		digest_buf = calloc(1, digest_len);
-	} else if (0 == strcasecmp(digest, "sha256")) {
-		digest_type = 2;
-		digest_init = (digest_init_t *) SHA256_Init;
-		digest_update = (digest_update_t *) SHA256_Update;
-		digest_final = (digest_final_t *) SHA256_Final;
-		digest_ctx = calloc(1, sizeof(SHA256_CTX));
-		digest_len = SHA256_DIGEST_LENGTH;
-		digest_buf = calloc(1, digest_len);
-	} else if (0 == strcasecmp(digest, "sha384")) {
-		digest_type = 4;
-		digest_init = (digest_init_t *) SHA384_Init;
-		digest_update = (digest_update_t *) SHA384_Update;
-		digest_final = (digest_final_t *) SHA384_Final;
-		digest_ctx = calloc(1, sizeof(SHA512_CTX));
-		digest_len = SHA384_DIGEST_LENGTH;
-		digest_buf = calloc(1, digest_len);
-	} else {
-		errx(1, "%s(%d): Unsupported digest type '%s'", __FILE__, __LINE__, digest);
-	}
-
 	theZone = zonemd_read_zone(origin_str, input, 0, LDNS_RR_CLASS_IN);
-	if (placeholder)
-		zonemd_add_placeholder(theZone, digest_type, digest_len);
+	if (placeholder) {
+		digester *d = zonemd_digester(placeholder);
+		zonemd_add_placeholder(theZone, d->type, d->len);
+		zonemd_digester_free(d);
+	}
 	if (calculate) {
 		uint8_t found_digest_type;
+		digester *d = 0;
 		ldns_rr *zonemd_rr = zonemd_find(theZone, 0, &found_digest_type, 0, 0);
 		if (!zonemd_rr)
 			errx(1, "%s(%d): No %s record found in zone.  Use -p to add one.", __FILE__, __LINE__, RRNAME);
-		zonemd_calc_digest(theZone, digest_init, digest_update, digest_final, digest_ctx, digest_buf, digest_len);
+		d = zonemd_digester(found_digest_type);
+		zonemd_calc_digest(theZone, d->init, d->update, d->final, d->ctx, d->buf, d->len);
 		if (zonemd_rr)
-			zonemd_update_digest(zonemd_rr, digest_type, digest_buf, digest_len);
+			zonemd_update_digest(zonemd_rr, d->type, d->buf, d->len);
 		if (zonemd_rr && zsk_fname)
 			zonemd_resign(zonemd_rr, zsk_fname, theZone);
+		zonemd_digester_free(d);
 	}
 	if (verify) {
 	}
 	zonemd_write_zone(theZone, stdout);
 
-	if (digest_ctx)
-		free(digest_ctx);
-	if (digest_buf)
-		free(digest_buf);
 	if (zsk_fname)
 		free(zsk_fname);
 	if (origin_str)
