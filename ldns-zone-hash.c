@@ -84,7 +84,7 @@ zonemd_update_digest(ldns_rr * rr, uint8_t digest_type, unsigned char *digest_bu
 
 	memcpy(&rr_digest_type, &buf[4], 1);
 	if (rr_digest_type != digest_type)
-		errx(1, "zonemd_update_digest mismatched digest type.  Found %u but wanted %u.", rr_digest_type, digest_type);
+		errx(1, "%s(%d): zonemd_update_digest mismatched digest type.  Found %u but wanted %u.", __FILE__, __LINE__, rr_digest_type, digest_type);
 
 	memcpy(&buf[5], digest_buf, digest_len);
 	ldns_rr_push_rdf(rr, rdf);
@@ -107,9 +107,9 @@ zonemd_read_zone(const char *origin_str, FILE * fp, uint32_t ttl, ldns_rr_class 
 	assert(origin);
 	status = ldns_zone_new_frm_fp(&zone, fp, origin, ttl, class);
 	if (status != LDNS_STATUS_OK)
-		errx(1, "ldns_zone_new_frm_fp: %s", ldns_get_errorstr_by_id(status));
+		errx(1, "%s(%d): ldns_zone_new_frm_fp: %s", __FILE__, __LINE__, ldns_get_errorstr_by_id(status));
 	if (!ldns_zone_soa(zone))
-		errx(1, "No SOA record in zone");
+		errx(1, "%s(%d): No SOA record in zone", __FILE__, __LINE__);
 	/*
 	 * ldns_zone_new_frm_fp() doesn't put the SOA into the rr
 	 * list, but if we add it here it sticks around.
@@ -204,7 +204,7 @@ zonemd_calc_digest(ldns_zone * zone, digest_init_t *init, digest_update_t *updat
 	assert(rrlist);
 
 	if (!init(ctx))
-		errx(1, "Digest init failed");
+		errx(1, "%s(%d): Digest init failed", __FILE__, __LINE__);
 
 	fprintf(stderr, "Calculating Digest...");
 	for (i = 0; i < ldns_rr_list_rr_count(rrlist); i++) {
@@ -216,13 +216,13 @@ zonemd_calc_digest(ldns_zone * zone, digest_init_t *init, digest_update_t *updat
 				continue;
 		status = ldns_rr2wire(&buf, rr, LDNS_SECTION_ANSWER, &sz);
 		if (status != LDNS_STATUS_OK)
-			errx(1, "ldns_rr2wire() failed");
+			errx(1, "%s(%d): ldns_rr2wire() failed", __FILE__, __LINE__);
 		if (!update(ctx, buf, sz))
-			errx(1, "Digest update failed");
+			errx(1, "%s(%d): Digest update failed", __FILE__, __LINE__);
 		free(buf);
 	}
 	if (!final(buf, ctx))
-		errx(1, "Digest final failed");
+		errx(1, "%s(%d): Digest final failed", __FILE__, __LINE__);
 	fprintf(stderr, "%s\n", "Done");
 
 	for (i = 0; i < len; i++) {
@@ -244,10 +244,10 @@ zonemd_resign(ldns_rr * rr, const char *zsk_fname, ldns_zone *zone)
 
 	fp = fopen(zsk_fname, "r");
 	if (fp == 0)
-		err(1, "%s", zsk_fname);
+		err(1, "%s(%d): %s", __FILE__, __LINE__, zsk_fname);
 	status = ldns_key_new_frm_fp(&zsk, fp);
 	if (status != LDNS_STATUS_OK)
-		errx(1, "ldns_key_new_frm_fp: %s", ldns_get_errorstr_by_id(status));
+		errx(1, "%s(%d): ldns_key_new_frm_fp: %s", __FILE__, __LINE__, ldns_get_errorstr_by_id(status));
 	ldns_key_set_pubkey_owner(zsk, origin);
 	keys = ldns_key_list_new();
 	assert(keys);
@@ -258,7 +258,7 @@ zonemd_resign(ldns_rr * rr, const char *zsk_fname, ldns_zone *zone)
 	ldns_rr_list_push_rr(rrset, rr);
 	rrsig = ldns_sign_public(rrset, keys);
 	if (rrsig == 0)
-		errx(1, "ldns_sign_public() failed");
+		errx(1, "%s(%d): ldns_sign_public() failed", __FILE__, __LINE__);
 
 	rrlist = zonemd_filter_rr_list(ldns_zone_rrs(zone), LDNS_RR_TYPE_RRSIG, LDNS_RR_TYPE_ZONEMD);
 	assert(rrlist);
@@ -349,7 +349,7 @@ main(int argc, char *argv[])
 	if (argc == 2) {
 		input = fopen(argv[1], "r");
 		if (0 == input)
-			err(1, "%s", argv[1]);
+			err(1, "%s(%d): %s", __FILE__, __LINE__, argv[1]);
 	}
 
 	if (0 == strcasecmp(digest, "sha1")) {
@@ -377,7 +377,7 @@ main(int argc, char *argv[])
 		digest_len = SHA384_DIGEST_LENGTH;
 		digest_buf = calloc(1, digest_len);
 	} else {
-		errx(1, "Unsupported digest type '%s'", digest);
+		errx(1, "%s(%d): Unsupported digest type '%s'", __FILE__, __LINE__, digest);
 	}
 
 	theZone = zonemd_read_zone(origin_str, input, 0, LDNS_RR_CLASS_IN);
@@ -387,7 +387,7 @@ main(int argc, char *argv[])
 		uint8_t found_digest_type;
 		ldns_rr *zonemd_rr = zonemd_find(theZone, 0, &found_digest_type, 0, 0);
 		if (!zonemd_rr)
-			errx(1, "No %s record found in zone.  Use -p to add one.", RRNAME);
+			errx(1, "%s(%d): No %s record found in zone.  Use -p to add one.", __FILE__, __LINE__, RRNAME);
 		zonemd_calc_digest(theZone, digest_init, digest_update, digest_final, digest_ctx, digest_buf, digest_len);
 		if (zonemd_rr)
 			zonemd_update_digest(zonemd_rr, digest_type, digest_buf, digest_len);
