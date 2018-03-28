@@ -75,7 +75,7 @@ zonemd_update_digest(ldns_rr * rr, uint8_t digest_type, unsigned char *digest_bu
 
 	memcpy(&rr_digest_type, &buf[4], 1);
 	if (rr_digest_type != digest_type)
-		errx(1, "zonemd_update_digest mismatched digest type");
+		errx(1, "zonemd_update_digest mismatched digest type.  Found %u but wanted %u.", rr_digest_type, digest_type);
 
 	memcpy(&buf[5], digest_buf, digest_len);
 	ldns_rr_push_rdf(rr, rdf);
