@@ -34,11 +34,12 @@ zonemd_pack(ldns_rdf * owner, uint32_t ttl, uint32_t serial, uint8_t digest_type
 ldns_rr *
 zonemd_find(ldns_zone *zone, uint8_t that_digest_type)
 {
-	ldns_rr *rr = 0;
+	ldns_rr *ret = 0;
 	ldns_rr_list *rrlist;
 	unsigned int i;
 	rrlist = ldns_zone_rrs(zone);
 	for (i = 0; i < ldns_rr_list_rr_count(rrlist); i++) {
+		ldns_rr *rr = 0;
 		ldns_rdf *rdf;
 		uint8_t this_digest_type;
 		unsigned char *buf;
@@ -54,9 +55,10 @@ zonemd_find(ldns_zone *zone, uint8_t that_digest_type)
 		memcpy(&this_digest_type, &buf[4], 1);
 		if (this_digest_type != that_digest_type)
 			continue;
+		ret = rr;
 		break;
 	}
-	return rr;
+	return ret;
 }
 
 void
