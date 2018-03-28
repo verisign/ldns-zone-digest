@@ -35,7 +35,7 @@ zonemd_pack(ldns_rdf * owner, uint32_t ttl, uint32_t serial, uint8_t digest_type
 }
 
 ldns_rr *
-zonemd_find(ldns_zone *zone, uint8_t that_digest_type)
+zonemd_find(ldns_zone *zone, uint32_t *ret_serial, uint8_t *ret_digest_type, void *ret_digest, size_t digest_sz)
 {
 	ldns_rr *ret = 0;
 	ldns_rr_list *rrlist;
@@ -44,20 +44,26 @@ zonemd_find(ldns_zone *zone, uint8_t that_digest_type)
 	for (i = 0; i < ldns_rr_list_rr_count(rrlist); i++) {
 		ldns_rr *rr = 0;
 		ldns_rdf *rdf;
-		uint8_t this_digest_type;
 		unsigned char *buf;
+		size_t rdlen;
 		rr = ldns_rr_list_rr(rrlist, i);
 		if (ldns_rr_get_type(rr) != LDNS_RR_TYPE_ZONEMD)
 			continue;
 		rdf = ldns_rr_rdf(rr, 0);
 		assert(rdf);
-		if (ldns_rdf_size(rdf) < 5)
-			continue;
+		rdlen = ldns_rdf_size(rdf);
+		if (rdlen < 5)
+			errx(1, "%s(%d): %s RR rdlen (%d) too short", __FILE__, __LINE__, RRNAME, (int) rdlen);
 		buf = ldns_rdf_data(rdf);
 		assert(buf);
-		memcpy(&this_digest_type, &buf[4], 1);
-		if (this_digest_type != that_digest_type)
-			continue;
+		if (ret_serial)
+			memcpy(ret_serial, &buf[0], 4);
+		rdlen -= 4;
+		if (ret_digest_type)
+			memcpy(ret_digest_type, &buf[4], 1);
+		rdlen -= 1;
+		if (ret_digest)
+			memcpy(ret_digest, &buf[5], digest_sz < rdlen ? digest_sz : rdlen);
 		ret = rr;
 		break;
 	}
@@ -378,7 +384,8 @@ main(int argc, char *argv[])
 	if (placeholder)
 		zonemd_add_placeholder(theZone, digest_type, digest_len);
 	if (calculate) {
-		ldns_rr *zonemd_rr = zonemd_find(theZone, digest_type);
+		uint8_t found_digest_type;
+		ldns_rr *zonemd_rr = zonemd_find(theZone, 0, &found_digest_type, 0, 0);
 		if (!zonemd_rr)
 			errx(1, "No %s record found in zone.  Use -p to add one.", RRNAME);
 		zonemd_calc_digest(theZone, digest_init, digest_update, digest_final, digest_ctx, digest_buf, digest_len);
