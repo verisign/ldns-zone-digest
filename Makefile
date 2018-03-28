@@ -1,7 +1,7 @@
 PROG=ldns-zone-hash
 
 ${PROG}: ${PROG}.o
-	${CC} -o $@ ${PROG}.o ${LDFLAGS}
+	${CC} -g -o $@ ${PROG}.o ${LDFLAGS}
 
 ${PROG}.o: ${PROG}.c
-	${CC} -c -o $@ ${PROG}.c ${CPPFLAGS}
+	${CC} -g -c -o $@ ${PROG}.c ${CPPFLAGS}
