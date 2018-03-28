@@ -1,2 +1,2 @@
-ldns-zone-hash
-ldns-zone-hash.o
+ldns-zone-digest
+ldns-zone-digest.o

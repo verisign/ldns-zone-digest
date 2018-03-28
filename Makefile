@@ -1,4 +1,4 @@
-PROG=ldns-zone-hash
+PROG=ldns-zone-digest
 
 ${PROG}: ${PROG}.o
 	${CC} -g -o $@ ${PROG}.o ${LDFLAGS}

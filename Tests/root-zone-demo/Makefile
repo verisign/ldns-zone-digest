@@ -1,5 +1,5 @@
 READZONE=ldns-read-zone
-ZONEHASH=../../ldns-zone-hash
+ZONEHASH=../../ldns-zone-digest
 
 all: root.zone.hashed
 	${ZONEHASH} -v . root.zone.hashed 
