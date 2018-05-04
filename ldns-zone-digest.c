@@ -13,6 +13,9 @@ typedef int (digest_final_t) (unsigned char *, void *);
 const ldns_rr_type LDNS_RR_TYPE_ZONEMD = 65317;
 const char *RRNAME = "ZONEMD";
 static ldns_rdf *origin = 0;
+static int xor_mode = 0;
+
+void zonemd_print_digest(FILE *, const char *, const unsigned char *, unsigned int, const char *);
 
 ldns_rr *
 zonemd_pack(ldns_rdf * owner, uint32_t ttl, uint32_t serial, uint8_t digest_type, void *digest, size_t digest_sz)
@@ -187,11 +190,78 @@ zonemd_add_placeholder(ldns_zone * zone, uint8_t digest_type, unsigned int diges
 }
 
 void
+zonemd_calc_digest_xor(ldns_zone * zone, digest_init_t *init, digest_update_t *update, digest_final_t *final, void *ctx, unsigned char *buf, unsigned int len)
+{
+	ldns_rr_list *rrlist = 0;
+	ldns_status status;
+	unsigned int i;
+	int ctx_state = 0;
+	unsigned char *xor_buf = 0;
+	ldns_rr_type xor_last_type = 0;
+	ldns_rdf *xor_last_owner = 0;
+	unsigned int k;
+
+	xor_buf = calloc(1, len);
+	assert(xor_buf);
+
+	fprintf(stderr, "Sorting Zone...");
+	/*
+	 * thankfully ldns_zone_sort() already sorts by RRtype for same owner name
+	 */
+	ldns_zone_sort(zone);
+	rrlist = ldns_zone_rrs(zone);
+	fprintf(stderr, "%s\n", "Done");
+	assert(rrlist);
+
+	fprintf(stderr, "Calculating Digest...");
+	for (i = 0; i < ldns_rr_list_rr_count(rrlist); i++) {
+		uint8_t *wire_buf;
+		size_t sz;
+		ldns_rr *rr = ldns_rr_list_rr(rrlist, i);
+		if (ldns_rr_get_type(rr) == LDNS_RR_TYPE_RRSIG)
+			if (my_typecovered(rr) == LDNS_RR_TYPE_ZONEMD)
+				continue;
+		if (ctx_state == 1) {
+			if (ldns_rdf_compare(xor_last_owner, ldns_rr_owner(rr)) || xor_last_type != ldns_rr_get_type(rr)) {
+				if (!final(xor_buf, ctx))
+					errx(1, "%s(%d): Digest final failed", __FILE__, __LINE__);
+				ctx_state = 0;
+				for (k = 0; k < len; k++)
+					buf[k] ^= xor_buf[k];
+			}
+		}
+		if (ctx_state == 0) {
+			if (!init(ctx))
+				errx(1, "%s(%d): Digest init failed", __FILE__, __LINE__);
+			ctx_state = 1;
+		}
+		status = ldns_rr2wire(&wire_buf, rr, LDNS_SECTION_ANSWER, &sz);
+		if (status != LDNS_STATUS_OK)
+			errx(1, "%s(%d): ldns_rr2wire() failed", __FILE__, __LINE__);
+		if (!update(ctx, wire_buf, sz))
+			errx(1, "%s(%d): Digest update failed", __FILE__, __LINE__);
+		free(wire_buf);
+		xor_last_owner = ldns_rr_owner(rr);
+		xor_last_type = ldns_rr_get_type(rr);
+	}
+	if (!final(xor_buf, ctx))
+		errx(1, "%s(%d): Digest final failed", __FILE__, __LINE__);
+	for (k = 0; k < len; k++)
+		buf[k] ^= xor_buf[k];
+	fprintf(stderr, "%s\n", "Done");
+}
+
+void
 zonemd_calc_digest(ldns_zone * zone, digest_init_t *init, digest_update_t *update, digest_final_t *final, void *ctx, unsigned char *buf, unsigned int len)
 {
 	ldns_rr_list *rrlist = 0;
 	ldns_status status;
 	unsigned int i;
+
+	if (xor_mode) {
+		zonemd_calc_digest_xor(zone, init, update, final, ctx, buf, len);
+		return;
+	}
 
 	fprintf(stderr, "Sorting Zone...");
 	/*
@@ -375,7 +445,7 @@ main(int argc, char *argv[])
 	if (0 == progname)
 		progname = argv[0];
 
-	while ((ch = getopt(argc, argv, "cp:vz:")) != -1) {
+	while ((ch = getopt(argc, argv, "cp:vz:X")) != -1) {
 		switch (ch) {
 		case 'c':
 			calculate = 1;
@@ -388,6 +458,9 @@ main(int argc, char *argv[])
 			break;
 		case 'z':
 			zsk_fname = strdup(optarg);
+			break;
+		case 'X':
+			xor_mode = 1;
 			break;
 		default:
 			usage(progname);
