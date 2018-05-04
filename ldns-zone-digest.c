@@ -207,18 +207,18 @@ zonemd_calc_digest(ldns_zone * zone, digest_init_t *init, digest_update_t *updat
 
 	fprintf(stderr, "Calculating Digest...");
 	for (i = 0; i < ldns_rr_list_rr_count(rrlist); i++) {
-		uint8_t *buf;
+		uint8_t *wire_buf;
 		size_t sz;
 		ldns_rr *rr = ldns_rr_list_rr(rrlist, i);
 		if (ldns_rr_get_type(rr) == LDNS_RR_TYPE_RRSIG)
 			if (my_typecovered(rr) == LDNS_RR_TYPE_ZONEMD)
 				continue;
-		status = ldns_rr2wire(&buf, rr, LDNS_SECTION_ANSWER, &sz);
+		status = ldns_rr2wire(&wire_buf, rr, LDNS_SECTION_ANSWER, &sz);
 		if (status != LDNS_STATUS_OK)
 			errx(1, "%s(%d): ldns_rr2wire() failed", __FILE__, __LINE__);
-		if (!update(ctx, buf, sz))
+		if (!update(ctx, wire_buf, sz))
 			errx(1, "%s(%d): Digest update failed", __FILE__, __LINE__);
-		free(buf);
+		free(wire_buf);
 	}
 	if (!final(buf, ctx))
 		errx(1, "%s(%d): Digest final failed", __FILE__, __LINE__);
