@@ -1,3 +1,40 @@
+/*
+ * ldns-zone-digest
+ *
+ * ldns-zone-digest is a proof-of-concept implementation of
+ * draft-wessels-dns-zone-digest, utilizing the ldns library.  That
+ * Internet Draft describes how to compute, sign, and validate a
+ * message digest covering a DNS zone File.
+ *
+ * Copyright (c) 2018, Verisign, Inc.
+ * All rights reserved.
+ * 
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions are met:
+ * 
+ * * Redistributions of source code must retain the above copyright notice, this
+ *   list of conditions and the following disclaimer.
+ * 
+ * * Redistributions in binary form must reproduce the above copyright notice,
+ *   this list of conditions and the following disclaimer in the documentation
+ *   and/or other materials provided with the distribution.
+ * 
+ * * Neither the name of the copyright holder nor the names of its
+ *   contributors may be used to endorse or promote products derived from
+ *   this software without specific prior written permission.
+ * 
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+ * AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+ * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+ * DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE
+ * FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+ * DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
+ * SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
+ * CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
+ * OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+ * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+ */
+
 #include <stdio.h>
 #include <unistd.h>
 #include <stdlib.h>
@@ -17,6 +54,11 @@ static int xor_mode = 0;
 
 void zonemd_print_digest(FILE *, const char *, const unsigned char *, unsigned int, const char *);
 
+/*
+ * zonemd_pack()
+ *
+ * This function creates and returns an ldns_rr for the ZONEMD record.
+ */
 ldns_rr *
 zonemd_pack(ldns_rdf * owner, uint32_t ttl, uint32_t serial, uint8_t digest_type, void *digest, size_t digest_sz)
 {
@@ -37,6 +79,12 @@ zonemd_pack(ldns_rdf * owner, uint32_t ttl, uint32_t serial, uint8_t digest_type
 	return rr;
 }
 
+/*
+ * zonemd_find()
+ *
+ * This function searches through an ldns_zone and returns the first ZONEMD record found.
+ * It "unpacks" the found RR into the ret_ paramaters.
+ */
 ldns_rr *
 zonemd_find(ldns_zone *zone, uint32_t *ret_serial, uint8_t *ret_digest_type, void *ret_digest, size_t digest_sz)
 {
@@ -73,6 +121,11 @@ zonemd_find(ldns_zone *zone, uint32_t *ret_serial, uint8_t *ret_digest_type, voi
 	return ret;
 }
 
+/*
+ * zonemd_update_digest() 
+ *
+ * Updates the digest part of a placeholder ZONEMD record.
+ */
 void
 zonemd_update_digest(ldns_rr * rr, uint8_t digest_type, unsigned char *digest_buf, unsigned int digest_len)
 {
@@ -93,12 +146,28 @@ zonemd_update_digest(ldns_rr * rr, uint8_t digest_type, unsigned char *digest_bu
 	ldns_rr_push_rdf(rr, rdf);
 }
 
+/*
+ * zonemd_print()
+ *
+ * Convenience function to print a ZONEMD record.  Currently it prints in the
+ * RFC3597 unknown RR format.
+ */
 void
 zonemd_print(FILE * fp, ldns_rr * rr)
 {
 	ldns_rr_print(fp, rr);
 }
 
+/*
+ * zonemd_read_zone()
+ *
+ * Read a zone file from disk, with a little extra processing.
+ *
+ * The ldns library functions don't add the SOA record to its the ldns_zone
+ * ldns_rr_list of records.  The SOA is maintained separately.  However, this program
+ * is simplified if the list returned by ldns_zone_rrs() does include the SOA record,
+ * so we add it here.
+ */
 ldns_zone *
 zonemd_read_zone(const char *origin_str, FILE * fp, uint32_t ttl, ldns_rr_class class)
 {
@@ -122,6 +191,11 @@ zonemd_read_zone(const char *origin_str, FILE * fp, uint32_t ttl, ldns_rr_class 
 	return zone;
 }
 
+/*
+ * my_typecovered()
+ *
+ * Convenience function to return the typecovered attribute of an RRSIG.
+ */
 ldns_rr_type
 my_typecovered(ldns_rr *rrsig)
 {
@@ -131,8 +205,10 @@ my_typecovered(ldns_rr *rrsig)
 }
 
 /*
+ * zonemd_filter_rr_list()
+ *
  * Filter out RRs of type 'type' from the input.  If 'type' is RRISG then
- * only signatures of type 'covered' are filtered.
+ * signatures of type 'covered' are filtered.
  */
 ldns_rr_list *
 zonemd_filter_rr_list(ldns_rr_list *input, ldns_rr_type type, ldns_rr_type covered)
@@ -161,6 +237,12 @@ zonemd_filter_rr_list(ldns_rr_list *input, ldns_rr_type type, ldns_rr_type cover
 	return output;
 }
 
+/*
+ * zonemd_add_placeholder()
+ *
+ * Creates a placeholder ZONEMD record and adds it to 'zone'.  If 'zone' already
+ * has a ZONEMD record, it is removed and discarded.
+ */
 void
 zonemd_add_placeholder(ldns_zone * zone, uint8_t digest_type, unsigned int digest_len)
 {
@@ -189,6 +271,14 @@ zonemd_add_placeholder(ldns_zone * zone, uint8_t digest_type, unsigned int diges
 	fprintf(stderr, "Done\n");
 }
 
+/*
+ * zonemd_calc_digest_xor()
+ *
+ * Calculates a digest over the zone using the "XOR technique."  Here there is a digest
+ * calculation for each RRset and the final digest is an XOR of all the per-rrset digests.
+ * This supports incremental updates of the digest.  Deletions can be xor'd out and additions
+ * xor'd in.
+ */
 void
 zonemd_calc_digest_xor(ldns_zone * zone, digest_init_t *init, digest_update_t *update, digest_final_t *final, void *ctx, unsigned char *buf, unsigned int len)
 {
@@ -251,6 +341,11 @@ zonemd_calc_digest_xor(ldns_zone * zone, digest_init_t *init, digest_update_t *u
 	fprintf(stderr, "%s\n", "Done");
 }
 
+/*
+ * zonemd_calc_digest()
+ *
+ * Calculate a digest over the zone.
+ */
 void
 zonemd_calc_digest(ldns_zone * zone, digest_init_t *init, digest_update_t *update, digest_final_t *final, void *ctx, unsigned char *buf, unsigned int len)
 {
@@ -295,6 +390,12 @@ zonemd_calc_digest(ldns_zone * zone, digest_init_t *init, digest_update_t *updat
 	fprintf(stderr, "%s\n", "Done");
 }
 
+/*
+ * zonemd_resign()
+ *
+ * Calculate an RRSIG for the ZONEMD record ('rr' parameter).  Requires access to the private
+ * zone signing key.
+ */
 void
 zonemd_resign(ldns_rr * rr, const char *zsk_fname, ldns_zone *zone)
 {
@@ -334,6 +435,11 @@ zonemd_resign(ldns_rr * rr, const char *zsk_fname, ldns_zone *zone)
 	ldns_rr_list_free(rrset);
 }
 
+/*
+ * zonemd_write_zone()
+ *
+ * Prints all records in 'zone' to 'fp'
+ */
 void
 zonemd_write_zone(ldns_zone * zone, FILE * fp)
 {
@@ -348,6 +454,11 @@ zonemd_write_zone(ldns_zone * zone, FILE * fp)
 	}
 }
 
+/*
+ * zonemd_print_digest()
+ *
+ * Prints a digest value in hex representation for debugging.
+ */
 void
 zonemd_print_digest(FILE *fp, const char *preamble, const unsigned char *buf, unsigned int len, const char *postamble)
 {
@@ -371,6 +482,12 @@ typedef struct {
 	unsigned int len;
 } digester;
 
+/*
+ * zonemd_digester()
+ *
+ * Sets the function pointers and parameters for chosen digest algorithm.
+ * The OpenSSL library probably can do this just as easily.
+ */
 digester *
 zonemd_digester(uint8_t type)
 {
@@ -406,6 +523,11 @@ zonemd_digester(uint8_t type)
 	return &D;
 }
 
+/*
+ * zonemd_digester_free()
+ *
+ * Free digester resources
+ */
 void
 zonemd_digester_free(digester *d)
 {
@@ -424,7 +546,6 @@ usage(const char *p)
 	fprintf(stderr, "\t-v\t\tverify the zone digest\n");
 	exit(2);
 }
-
 
 
 int
