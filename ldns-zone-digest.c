@@ -544,6 +544,7 @@ usage(const char *p)
 	fprintf(stderr, "\t-c\t\tcalculate the zone digest\n");
 	fprintf(stderr, "\t-p type\t\tinsert placeholder record of type (1, 2, 4)\n");
 	fprintf(stderr, "\t-v\t\tverify the zone digest\n");
+	fprintf(stderr, "\t-X\t\tXOR digest technique\n");
 	exit(2);
 }
 
