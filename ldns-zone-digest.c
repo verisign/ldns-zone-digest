@@ -202,7 +202,9 @@ zonemd_read_zone(const char *origin_str, FILE * fp, uint32_t ttl, ldns_rr_class 
 			(void) 0;
 		} else {
 			/* out-of-zone */
-			warnx("Ignoring out-of-zone data for '%s'", ldns_rdf2str(ldns_rr_owner(rr)));
+			char *s = ldns_rdf2str(ldns_rr_owner(rr));
+			warnx("Ignoring out-of-zone data for '%s'", s);
+			free(s);
 			ldns_rr_list_push_rr(tbflist, rr);
 			continue;
 		}
@@ -216,6 +218,7 @@ zonemd_read_zone(const char *origin_str, FILE * fp, uint32_t ttl, ldns_rr_class 
 	fprintf(stderr, "%zu records\n", ldns_rr_list_rr_count(newlist));
 	ldns_zone_set_rrs(zone, newlist);
 	ldns_rr_list_deep_free(tbflist);
+	ldns_rr_list_free(oldlist);
 	return zone;
 }
 
