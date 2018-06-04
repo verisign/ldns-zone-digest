@@ -173,6 +173,10 @@ zonemd_read_zone(const char *origin_str, FILE * fp, uint32_t ttl, ldns_rr_class 
 {
 	ldns_zone *zone = 0;
 	ldns_status status;
+	ldns_rr_list *oldlist;
+	ldns_rr_list *newlist;
+	ldns_rr_list *tbflist;
+	unsigned int i;
 
 	fprintf(stderr, "Loading Zone...");
 	origin = ldns_rdf_new_frm_str(LDNS_RDF_TYPE_DNAME, origin_str);
@@ -183,11 +187,35 @@ zonemd_read_zone(const char *origin_str, FILE * fp, uint32_t ttl, ldns_rr_class 
 	if (!ldns_zone_soa(zone))
 		errx(1, "%s(%d): No SOA record in zone", __FILE__, __LINE__);
 	/*
+	 * Remove any out-of-zone data
+	 */
+	oldlist = ldns_zone_rrs(zone);
+	newlist = ldns_rr_list_new();
+	tbflist = ldns_rr_list_new();
+	for (i = 0; i < ldns_rr_list_rr_count(oldlist); i++) {
+		ldns_rr *rr = ldns_rr_list_rr(oldlist, i);
+		if (ldns_dname_compare(ldns_rr_owner(rr), origin) == 0) {
+			/* same owner */
+			(void) 0;
+		} else if (ldns_dname_is_subdomain(ldns_rr_owner(rr), origin)) {
+			/* subdomain */
+			(void) 0;
+		} else {
+			/* out-of-zone */
+			warnx("Ignoring out-of-zone data for '%s'", ldns_rdf2str(ldns_rr_owner(rr)));
+			ldns_rr_list_push_rr(tbflist, rr);
+			continue;
+		}
+		ldns_rr_list_push_rr(newlist, rr);
+	}
+	/*
 	 * ldns_zone_new_frm_fp() doesn't put the SOA into the rr
 	 * list, but if we add it here it sticks around.
 	 */
-	ldns_rr_list_push_rr(ldns_zone_rrs(zone), ldns_rr_clone(ldns_zone_soa(zone)));
-	fprintf(stderr, "%zu records\n", ldns_rr_list_rr_count(ldns_zone_rrs(zone)));
+	ldns_rr_list_push_rr(newlist, ldns_rr_clone(ldns_zone_soa(zone)));
+	fprintf(stderr, "%zu records\n", ldns_rr_list_rr_count(newlist));
+	ldns_zone_set_rrs(zone, newlist);
+	ldns_rr_list_deep_free(tbflist);
 	return zone;
 }
 
