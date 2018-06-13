@@ -29,6 +29,7 @@ for ZF in /zfa/Zones/*/2018/*-${YYYYMMDD}.gz ; do
 		gzip -dc $ZF > $UDIR/$ZN
 	fi
 	NR=`wc -l < $UDIR/$ZN`
+	NRSET=`cat $UDIR/$ZN | awk '{print $1,$4}' | sort | uniq -i | wc -l`
 	rm -f /tmp/cpu
 	if test "$MODE" = "-c" ; then
 		/usr/bin/time --format '%U %S' --output /tmp/cpu \
@@ -42,7 +43,7 @@ for ZF in /zfa/Zones/*/2018/*-${YYYYMMDD}.gz ; do
 		< $DDIR/$ZN
 	fi
 	CPU=`cat /tmp/cpu`
-	echo "$ZN $NR $CPU" >> ${LOG}_
+	echo "$ZN $NR $NRSET $CPU" >> ${LOG}_
 done
 
 sort -n -k 2 < ${LOG}_ > ${LOG}
