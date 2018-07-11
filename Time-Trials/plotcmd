@@ -1,0 +1,36 @@
+set term png size 900,600
+set style data linespoints
+
+set logscale x
+set logscale y
+
+set key off
+set title 'Time to Validate Zone Digest (SHA256)'
+set xlabel 'Zone Size (Record Count)'
+set ylabel 'Time (seconds)'
+
+unset label
+unset arrow
+
+set label ".net" left at 34731344, 323.91+10.96 front offset 0.5,0
+#set arrow from 34731344,1300 to 34731344,500 lc 'black' lw 1 front size 0.3,15
+
+set label ".xyz" left at 4688504, 42.47+1.76 front offset 0.5,0
+#set arrow from 4688504,150 to 4688504,60 lc 'black' lw 1 front size 0.3,15
+
+set label ".app" left at 1183278, 18.73+0.74 front offset 0.5,0
+#set arrow from 1183278,70 to 1183278,30 lc 'black' lw 1 front size 0.3,15
+
+set label ".space" left at 558178, 5.02+0.18 front offset 0.5,0
+#set arrow from 558178,20 to 558178,7 lc 'black' lw 1 front size 0.3,15
+
+set label ".accountant" left at 117013,1.19+0.03 front offset 0.5,0
+#set arrow from 117013,7 to 117013,1.19+0.03 lc 'black' lw 1 front size 0.3,15
+
+set label "root" left at 22493, 0.17+0.00 front offset 0.5,0
+#set arrow from 22493,1.5 to 22493,0.17+0.00 lc 'black' lw 1 front size 0.3,15
+
+set grid y
+set style data linespoints
+plot 'validate-alg2.log' using ($2):($4+$5) t 'SHA256' \
+
