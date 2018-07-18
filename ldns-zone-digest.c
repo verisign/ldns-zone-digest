@@ -653,10 +653,23 @@ main(int argc, char *argv[])
 	if (verify) {
 		uint8_t found_digest_type;
 		unsigned char found_digest_buf[512];
+		uint32_t found_serial = 0;
+		ldns_rr *soa = 0;
+		ldns_rdf *soa_serial_rdf = 0;
+		uint32_t soa_serial = 0;
 		digester *d = 0;
-		ldns_rr *zonemd_rr = zonemd_find(theZone, 0, &found_digest_type, found_digest_buf, sizeof(found_digest_buf));
+		ldns_rr *zonemd_rr = zonemd_find(theZone, &found_serial, &found_digest_type, found_digest_buf, sizeof(found_digest_buf));
 		if (!zonemd_rr)
 			errx(1, "%s(%d): No %s record found in zone, cannot verify.", __FILE__, __LINE__, RRNAME);
+		soa = ldns_zone_soa(theZone);
+		if (!soa)
+			errx(1, "%s(%d): No SOA record found in zone, cannot verify.", __FILE__, __LINE__);
+		soa_serial_rdf = ldns_rr_rdf(soa, 2);
+		soa_serial = ldns_rdf2native_int32(soa_serial_rdf);
+		if (found_serial != soa_serial) {
+			fprintf(stderr, "%s(%d): SOA serial (%u) does not match ZONEMD serial (%u)\n", __FILE__, __LINE__, soa_serial, found_serial);
+			rc |= 1;
+		}
 		d = zonemd_digester(found_digest_type);
 		assert(d->len <= sizeof(found_digest_buf));
 		/* NOTE d->type is zeroed by zonemd_digester() */
