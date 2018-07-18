@@ -64,7 +64,7 @@ zonemd_pack(ldns_rdf * owner, uint32_t ttl, uint32_t serial, uint8_t digest_type
 {
 	char *buf;
 	buf = calloc(1, 4 + 1 + digest_sz);
-	memcpy(&buf[0], &serial, 4);
+	ldns_write_uint32(&buf[0], serial);
 	memcpy(&buf[4], &digest_type, 1);
 	memcpy(&buf[5], digest, digest_sz);
 	ldns_rdf *rdf = ldns_rdf_new_frm_data(LDNS_RDF_TYPE_UNKNOWN, 4 + 1 + digest_sz, buf);
@@ -108,7 +108,7 @@ zonemd_find(ldns_zone *zone, uint32_t *ret_serial, uint8_t *ret_digest_type, voi
 		buf = ldns_rdf_data(rdf);
 		assert(buf);
 		if (ret_serial)
-			memcpy(ret_serial, &buf[0], 4);
+			*ret_serial = ldns_read_uint32(&buf[0]);
 		rdlen -= 4;
 		if (ret_digest_type)
 			memcpy(ret_digest_type, &buf[4], 1);
