@@ -1,6 +1,5 @@
 example.	86400	IN	A	127.0.0.1
 example.	86400	IN	NS	ns.example.
 example.	86400	IN	SOA	ns.example. admin.example. 2018031900 1800 900 604800 86400
-example.	86400	IN	TYPE65317	\# 37 1cb94878025e3e4b5f4443000186aac4b7806ba617d7462889c866fe056656e0efd225d72e
+example.	86400	IN	TYPE65317	\# 37 7848b91c02206d8daee1ffb57f4cab4822a4172b5f06b1559bda1dc1c65b12f1982cdda33f
 ns.example.	86400	IN	A	127.0.0.1
-out.of.zone.	300	IN	TXT	"this is out-of-zone data"
