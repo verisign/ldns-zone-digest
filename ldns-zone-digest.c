@@ -42,10 +42,7 @@
 #include <ldns/ldns.h>
 #include <assert.h>
 #include <getopt.h>
-
-typedef int (digest_init_t) (void *);
-typedef int (digest_update_t) (void *, const void *, size_t);
-typedef int (digest_final_t) (unsigned char *, void *);
+#include <openssl/evp.h>
 
 const ldns_rr_type LDNS_RR_TYPE_ZONEMD = 65317;
 const char *RRNAME = "ZONEMD";
@@ -307,11 +304,12 @@ zonemd_add_placeholder(ldns_zone * zone, uint8_t digest_type, unsigned int diges
  * Calculate a digest over the zone.
  */
 void
-zonemd_calc_digest(ldns_zone * zone, digest_init_t *init, digest_update_t *update, digest_final_t *final, void *ctx, unsigned char *buf, unsigned int len)
+zonemd_calc_digest(ldns_zone * zone, const EVP_MD *md, unsigned char *buf)
 {
 	ldns_rr_list *rrlist = 0;
 	ldns_status status;
 	unsigned int i;
+	EVP_MD_CTX *ctx;
 
 	fprintf(stderr, "Sorting Zone...");
 	/*
@@ -322,7 +320,9 @@ zonemd_calc_digest(ldns_zone * zone, digest_init_t *init, digest_update_t *updat
 	fprintf(stderr, "%s\n", "Done");
 	assert(rrlist);
 
-	if (!init(ctx))
+	ctx = EVP_MD_CTX_create();
+	assert(ctx);
+	if (!EVP_DigestInit(ctx, md))
 		errx(1, "%s(%d): Digest init failed", __FILE__, __LINE__);
 
 	fprintf(stderr, "Calculating Digest...");
@@ -336,12 +336,13 @@ zonemd_calc_digest(ldns_zone * zone, digest_init_t *init, digest_update_t *updat
 		status = ldns_rr2wire(&wire_buf, rr, LDNS_SECTION_ANSWER, &sz);
 		if (status != LDNS_STATUS_OK)
 			errx(1, "%s(%d): ldns_rr2wire() failed", __FILE__, __LINE__);
-		if (!update(ctx, wire_buf, sz))
+		if (!EVP_DigestUpdate(ctx, wire_buf, sz))
 			errx(1, "%s(%d): Digest update failed", __FILE__, __LINE__);
 		free(wire_buf);
 	}
-	if (!final(buf, ctx))
+	if (!EVP_DigestFinal(ctx, buf, 0))
 		errx(1, "%s(%d): Digest final failed", __FILE__, __LINE__);
+	EVP_MD_CTX_destroy(ctx);
 	fprintf(stderr, "%s\n", "Done");
 }
 
@@ -427,69 +428,30 @@ zonemd_print_digest(FILE *fp, const char *preamble, const unsigned char *buf, un
 		fputs(postamble, fp);
 }
 
-typedef struct {
-	uint8_t type;
-	digest_init_t *init;
-	digest_update_t *update;
-	digest_final_t *final;
-	void *ctx;
-	unsigned char *buf;
-	unsigned int len;
-} digester;
-
 /*
  * zonemd_digester()
  *
- * Sets the function pointers and parameters for chosen digest algorithm.
- * The OpenSSL library probably can do this just as easily.
+ * wrapper around EVP_get_digestbyname() and so we can reference by number
  */
-digester *
+const EVP_MD *
 zonemd_digester(uint8_t type)
 {
-	static digester D;
-	memset(&D, 0, sizeof(D));
+	const char *name = 0;
+	const EVP_MD *md = 0;
+	OpenSSL_add_all_digests();
 	if (type == 1) {
-		D.type = 1;
-		D.init = (digest_init_t *) SHA1_Init;
-		D.update = (digest_update_t *) SHA1_Update;
-		D.final = (digest_final_t *) SHA1_Final;
-		D.ctx = calloc(1, sizeof(SHA_CTX));
-		D.len = SHA_DIGEST_LENGTH;
-		D.buf = calloc(1, D.len);
+		name = "sha1";
 	} else if (type == 2) {
-		D.type = 2;
-		D.init = (digest_init_t *) SHA256_Init;
-		D.update = (digest_update_t *) SHA256_Update;
-		D.final = (digest_final_t *) SHA256_Final;
-		D.ctx = calloc(1, sizeof(SHA256_CTX));
-		D.len = SHA256_DIGEST_LENGTH;
-		D.buf = calloc(1, D.len);
+		name = "sha256";
 	} else if (type == 4) {
-		D.type = 4;
-		D.init = (digest_init_t *) SHA384_Init;
-		D.update = (digest_update_t *) SHA384_Update;
-		D.final = (digest_final_t *) SHA384_Final;
-		D.ctx = calloc(1, sizeof(SHA512_CTX));
-		D.len = SHA384_DIGEST_LENGTH;
-		D.buf = calloc(1, D.len);
+		name = "sha384";
 	} else {
 		errx(1, "%s(%d): Unsupported digest type %u", __FILE__, __LINE__, type);
 	}
-	return &D;
-}
-
-/*
- * zonemd_digester_free()
- *
- * Free digester resources
- */
-void
-zonemd_digester_free(digester *d)
-{
-	if (d && d->ctx)
-		free(d->ctx);
-	if (d && d->buf)
-		free(d->buf);
+	md = EVP_get_digestbyname(name);
+	if (md == 0)
+		errx(1, "%s(%d): Unknown message digest '%s'", __FILE__, __LINE__, name);
+	return md;
 }
 
 void
@@ -553,22 +515,25 @@ main(int argc, char *argv[])
 
 	theZone = zonemd_read_zone(origin_str, input, 0, LDNS_RR_CLASS_IN);
 	if (placeholder) {
-		digester *d = zonemd_digester(placeholder);
-		zonemd_add_placeholder(theZone, d->type, d->len);
-		zonemd_digester_free(d);
+		const EVP_MD *md = zonemd_digester(placeholder);
+		zonemd_add_placeholder(theZone, placeholder, EVP_MD_size(md));
 	}
 	if (calculate) {
 		uint8_t found_digest_type;
-		digester *d = 0;
+		const EVP_MD *md = 0;
+		unsigned char *md_buf = 0;
+		unsigned int md_len = 0;
 		ldns_rr *zonemd_rr = zonemd_find(theZone, 0, &found_digest_type, 0, 0);
 		if (!zonemd_rr)
 			errx(1, "%s(%d): No %s record found in zone.  Use -p to add one.", __FILE__, __LINE__, RRNAME);
-		d = zonemd_digester(found_digest_type);
-		zonemd_calc_digest(theZone, d->init, d->update, d->final, d->ctx, d->buf, d->len);
-		zonemd_update_digest(zonemd_rr, d->type, d->buf, d->len);
+		md = zonemd_digester(found_digest_type);
+		md_len = EVP_MD_size(md);
+		md_buf = calloc(1, md_len);
+		assert(md_buf);
+		zonemd_calc_digest(theZone, md, md_buf);
+		zonemd_update_digest(zonemd_rr, found_digest_type, md_buf, md_len);
 		if (zsk_fname)
 			zonemd_resign(zonemd_rr, zsk_fname, theZone);
-		zonemd_digester_free(d);
 	}
 	if (verify) {
 		uint8_t found_digest_type;
@@ -577,7 +542,9 @@ main(int argc, char *argv[])
 		ldns_rr *soa = 0;
 		ldns_rdf *soa_serial_rdf = 0;
 		uint32_t soa_serial = 0;
-		digester *d = 0;
+		const EVP_MD *md = 0;
+		unsigned char *md_buf = 0;
+		unsigned int md_len = 0;
 		ldns_rr *zonemd_rr = zonemd_find(theZone, &found_serial, &found_digest_type, found_digest_buf, sizeof(found_digest_buf));
 		if (!zonemd_rr)
 			errx(1, "%s(%d): No %s record found in zone, cannot verify.", __FILE__, __LINE__, RRNAME);
@@ -590,20 +557,20 @@ main(int argc, char *argv[])
 			fprintf(stderr, "%s(%d): SOA serial (%u) does not match ZONEMD serial (%u)\n", __FILE__, __LINE__, soa_serial, found_serial);
 			rc |= 1;
 		}
-		d = zonemd_digester(found_digest_type);
-		assert(d->len <= sizeof(found_digest_buf));
-		/* NOTE d->type is zeroed by zonemd_digester() */
-		zonemd_update_digest(zonemd_rr, d->type, d->buf, d->len);
-		zonemd_calc_digest(theZone, d->init, d->update, d->final, d->ctx, d->buf, d->len);
-		if (memcmp(found_digest_buf, d->buf, d->len) != 0) {
+		md = zonemd_digester(found_digest_type);
+		assert(EVP_MD_size(md) <= sizeof(found_digest_buf));
+		md_len = EVP_MD_size(md);
+		md_buf = calloc(1, md_len);
+		zonemd_update_digest(zonemd_rr, found_digest_type, md_buf, md_len);
+		zonemd_calc_digest(theZone, md, md_buf);
+		if (memcmp(found_digest_buf, md_buf, md_len) != 0) {
 			fprintf(stderr, "Found and calculated digests do NOT match.\n");
-			zonemd_print_digest(stderr, "Found     : ", found_digest_buf, d->len, "\n");
-			zonemd_print_digest(stderr, "Calculated: ", d->buf, d->len, "\n");
+			zonemd_print_digest(stderr, "Found     : ", found_digest_buf, md_len, "\n");
+			zonemd_print_digest(stderr, "Calculated: ", md_buf, md_len, "\n");
 			rc |= 1;
 		} else {
 			fprintf(stderr, "Found and calculated digests do MATCH.\n");
 		}
-		zonemd_digester_free(d);
 	}
 	if (placeholder || calculate)
 		zonemd_write_zone(theZone, stdout);
