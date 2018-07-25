@@ -494,8 +494,10 @@ usage(const char *p)
 	fprintf(stderr, "\t-p type\t\tinsert placeholder record of type (1, 2, 4)\n");
 	fprintf(stderr, "\t-v\t\tverify the zone digest\n");
 	fprintf(stderr, "\t-z\t\tZSK file name\n");
+#if ZONEMD_INCREMENTAL
 	fprintf(stderr, "\t-B\t\tBranch width of hash tree\n");
 	fprintf(stderr, "\t-D\t\tDepth of hash tree\n");
+#endif
 	exit(2);
 }
 
@@ -532,12 +534,14 @@ main(int argc, char *argv[])
 		case 'z':
 			zsk_fname = strdup(optarg);
 			break;
+#if ZONEMD_INCREMENTAL
 		case 'B':
 			md_max_branch = strtoul(optarg, 0, 10);
 			break;
 		case 'D':
 			md_max_depth = strtoul(optarg, 0, 10);
 			break;
+#endif
 		default:
 			usage(progname);
 		}
