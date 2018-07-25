@@ -68,6 +68,11 @@ unsigned int md_max_depth = 0;
 unsigned int md_max_branch = 13;
 #endif
 
+#if DEBUG
+#define fdebugf(...) fprintf(__VA_ARGS__)
+#else
+#define fdebugf(...) (void)0
+#endif
 
 void zonemd_print_digest(FILE *, const char *, const unsigned char *, unsigned int, const char *);
 
@@ -658,9 +663,7 @@ md_tree_branch_by_name(unsigned int depth, const char *name)
 		return 0;
 	pos = depth % len;
 	branch = *(name+pos) % md_max_branch;
-#if DEBUG
-	fprintf(stderr, "%s(%d): md_tree_branch_by_name '%s' depth %u pos %u branch %u\n", __FILE__,__LINE__,name, depth, pos, branch);
-#endif
+	fdebugf(stderr, "%s(%d): md_tree_branch_by_name '%s' depth %u pos %u branch %u\n", __FILE__,__LINE__,name, depth, pos, branch);
 	return branch;
 }
 
@@ -682,9 +685,7 @@ md_tree_get_leaf(md_tree *node, const char *name)
 		}
 		return md_tree_get_leaf(node->kids[branch], name);
 	}
-#if DEBUG
-	fprintf(stderr, "%s(%d): md_tree_get_leaf depth %u branch %u\n", __FILE__,__LINE__,node->depth, node->branch);
-#endif
+	fdebugf(stderr, "%s(%d): md_tree_get_leaf depth %u branch %u\n", __FILE__,__LINE__,node->depth, node->branch);
 	assert(node->kids == 0);	/* leaf nodes don't have kids */
 	return node;
 }
@@ -697,9 +698,7 @@ md_tree_add_rr(md_tree *root, ldns_rr *rr)
 		node->rrlist = ldns_rr_list_new();
 		assert(node->rrlist);
 	}
-#if DEBUG
-	fprintf(stderr, "%s(%d): md_tree_add_rr depth %u branch %u\n", __FILE__,__LINE__,node->depth, node->branch);
-#endif
+	fdebugf(stderr, "%s(%d): md_tree_add_rr depth %u branch %u\n", __FILE__,__LINE__,node->depth, node->branch);
 	return ldns_rr_list_push_rr(node->rrlist, rr);
 }
 
@@ -730,9 +729,7 @@ void
 md_tree_calc_digest(const md_tree *node, const EVP_MD *md, unsigned char *buf)
 {
 	EVP_MD_CTX *ctx;
-#if DEBUG
-	fprintf(stderr, "%s(%d): md_tree_calc_digest depth %u branch %u\n", __FILE__,__LINE__,node->depth, node->branch);
-#endif
+	fdebugf(stderr, "%s(%d): md_tree_calc_digest depth %u branch %u\n", __FILE__,__LINE__,node->depth, node->branch);
 	ctx = EVP_MD_CTX_create();
 	assert(ctx);
 	if (!EVP_DigestInit(ctx, md))
@@ -756,10 +753,7 @@ md_tree_calc_digest(const md_tree *node, const EVP_MD *md, unsigned char *buf)
 			size_t sz;
 			ldns_status status;
 			ldns_rr *rr = ldns_rr_list_rr(node->rrlist, i);
-#if DEBUG
-			fprintf(stderr, "%s(%d): md_tree_calc_digest RR#%u: ", __FILE__,__LINE__,i);
-			ldns_rr_print(stderr, rr);
-#endif
+			fdebugf(stderr, "%s(%d): md_tree_calc_digest RR#%u: %s", __FILE__,__LINE__, i, ldns_rr2str(rr));
 			if (ldns_rr_get_type(rr) == LDNS_RR_TYPE_RRSIG)
 				if (my_typecovered(rr) == LDNS_RR_TYPE_ZONEMD)
 					continue;
