@@ -1,0 +1,8 @@
+set title 'Time to load zone and calculate hash'
+set xlabel 'Hash Tree Depth'
+set ylabel 'Hash Tree Width'
+set grid
+set view 60,300
+set hidden3d
+
+splot 'measure.dat' using 1:2:3 with lines t ''
