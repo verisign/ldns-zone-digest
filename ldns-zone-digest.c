@@ -49,19 +49,19 @@ const char *RRNAME = "ZONEMD";
 static ldns_rdf *origin = 0;
 
 #if ZONEMD_INCREMENTAL
-typedef struct _md_node {
+typedef struct _md_tree {
         unsigned int depth;
         unsigned int branch;    // only for debugging?
         ldns_rr_list *rrlist;
-        struct _md_node **kids;
-} md_node;
+        struct _md_tree **kids;
+} md_tree;
 
-md_node * md_node_get_leaf(md_node *n, const char *name);
-bool md_node_add_rr(md_node *root, ldns_rr *rr); 
-void md_node_del_rr(md_node *root, ldns_rr *rr); 
-void md_node_calc_digest(const md_node *n, const EVP_MD *md, unsigned char *buf);
+md_tree * md_tree_get_leaf(md_tree *node, const char *name);
+bool md_tree_add_rr(md_tree *root, ldns_rr *rr); 
+void md_tree_del_rr(md_tree *root, ldns_rr *rr); 
+void md_tree_calc_digest(const md_tree *node, const EVP_MD *md, unsigned char *buf);
 
-md_node *theRoot = 0;
+md_tree *theTree = 0;
 unsigned int md_max_depth = 0;
 unsigned int md_max_branch = 13;
 #endif
@@ -225,7 +225,7 @@ zonemd_read_zone(const char *origin_str, FILE * fp, uint32_t ttl, ldns_rr_class 
 		}
 		ldns_rr_list_push_rr(newlist, rr);
 #if ZONEMD_INCREMENTAL
-		md_node_add_rr(theRoot, rr);
+		md_tree_add_rr(theTree, rr);
 #endif
 	}
 	/*
@@ -235,7 +235,7 @@ zonemd_read_zone(const char *origin_str, FILE * fp, uint32_t ttl, ldns_rr_class 
 	ldns_rr *soa = ldns_rr_clone(ldns_zone_soa(zone));
 	ldns_rr_list_push_rr(newlist, soa);
 #if ZONEMD_INCREMENTAL
-	md_node_add_rr(theRoot, soa);
+	md_tree_add_rr(theTree, soa);
 #endif
 
 	fprintf(stderr, "%zu records\n", ldns_rr_list_rr_count(newlist));
@@ -286,7 +286,7 @@ zonemd_remove_rr(ldns_zone *zone, ldns_rr_type type, ldns_rr_type covered)
 		} else {
 			ldns_rr_list_push_rr(tbd, rr);
 #if ZONEMD_INCREMENTAL
-			md_node_del_rr(theRoot, rr);
+			md_tree_del_rr(theTree, rr);
 #endif
 		}
 	}
@@ -325,7 +325,7 @@ zonemd_add_placeholder(ldns_zone * zone, uint8_t digest_type, unsigned int diges
 	fprintf(stderr, "Add placeholder ZONEMD...\n");
 	ldns_rr_list_push_rr(ldns_zone_rrs(zone), zonemd);
 #if ZONEMD_INCREMENTAL
-	md_node_add_rr(theRoot, zonemd);
+	md_tree_add_rr(theTree, zonemd);
 #endif
 
 }
@@ -554,8 +554,8 @@ main(int argc, char *argv[])
 	}
 
 #if ZONEMD_INCREMENTAL
-	theRoot = calloc(1, sizeof(*theRoot));
-	assert(theRoot);
+	theTree = calloc(1, sizeof(*theTree));
+	assert(theTree);
 #endif
 
 	theZone = zonemd_read_zone(origin_str, input, 0, LDNS_RR_CLASS_IN);
@@ -576,7 +576,7 @@ main(int argc, char *argv[])
 		md_buf = calloc(1, md_len);
 		assert(md_buf);
 #if ZONEMD_INCREMENTAL
-		md_node_calc_digest(theRoot, md, md_buf);
+		md_tree_calc_digest(theTree, md, md_buf);
 #else
 		zonemd_calc_digest(theZone, md, md_buf);
 #endif
@@ -612,7 +612,7 @@ main(int argc, char *argv[])
 		md_buf = calloc(1, md_len);
 		zonemd_update_digest(zonemd_rr, found_digest_type, md_buf, md_len);
 #if ZONEMD_INCREMENTAL
-		md_node_calc_digest(theRoot, md, md_buf);
+		md_tree_calc_digest(theTree, md, md_buf);
 #else
 		zonemd_calc_digest(theZone, md, md_buf);
 #endif
@@ -641,7 +641,7 @@ main(int argc, char *argv[])
 #if ZONEMD_INCREMENTAL
 
 unsigned int
-md_node_branch_by_name(unsigned int depth, const char *name)
+md_tree_branch_by_name(unsigned int depth, const char *name)
 {
 	unsigned int len;
 	unsigned int pos;
@@ -652,107 +652,106 @@ md_node_branch_by_name(unsigned int depth, const char *name)
 	pos = depth % len;
 	branch = *(name+pos) % md_max_branch;
 #if DEBUG
-	fprintf(stderr, "%s(%d): md_node_branch_by_name '%s' depth %u pos %u branch %u\n", __FILE__,__LINE__,name, depth, pos, branch);
+	fprintf(stderr, "%s(%d): md_tree_branch_by_name '%s' depth %u pos %u branch %u\n", __FILE__,__LINE__,name, depth, pos, branch);
 #endif
 	return branch;
 }
 
-md_node *
-md_node_get_leaf(md_node *n, const char *name)
+md_tree *
+md_tree_get_leaf(md_tree *node, const char *name)
 {
-	if (md_max_depth > n->depth) {
-		unsigned int branch = md_node_branch_by_name(n->depth, name);
-		if (n->kids == 0) {
-			n->kids = calloc(md_max_branch, sizeof(*n->kids));
-			assert(n->kids);
+	if (md_max_depth > node->depth) {
+		unsigned int branch = md_tree_branch_by_name(node->depth, name);
+		if (node->kids == 0) {
+			node->kids = calloc(md_max_branch, sizeof(*node->kids));
+			assert(node->kids);
 		}
-		if (n->kids[branch] == 0) {
-			n->kids[branch] = calloc(1, sizeof(**n->kids));
-			assert(n->kids[branch]);
-			n->kids[branch]->depth = n->depth+1;
-			n->kids[branch]->branch = branch;
+		if (node->kids[branch] == 0) {
+			node->kids[branch] = calloc(1, sizeof(**node->kids));
+			assert(node->kids[branch]);
+			node->kids[branch]->depth = node->depth+1;
+			node->kids[branch]->branch = branch;
 		}
-		return md_node_get_leaf(n->kids[branch], name);
+		return md_tree_get_leaf(node->kids[branch], name);
 	}
 #if DEBUG
-	fprintf(stderr, "%s(%d): md_node_get_leaf depth %u branch %u\n", __FILE__,__LINE__,n->depth, n->branch);
+	fprintf(stderr, "%s(%d): md_tree_get_leaf depth %u branch %u\n", __FILE__,__LINE__,node->depth, node->branch);
 #endif
-	return n;
+	assert(node->kids == 0);	/* leaf nodes don't have kids */
+	return node;
 }
 
 bool
-md_node_add_rr(md_node *root, ldns_rr *rr)
+md_tree_add_rr(md_tree *root, ldns_rr *rr)
 {
-	md_node *n = md_node_get_leaf(root, ldns_rdf2str(ldns_rr_owner(rr)));
-	assert(n->kids == 0);	/* leaf nodes don't have kids */
-	if (n->rrlist == 0) {
-		n->rrlist = ldns_rr_list_new();
-		assert(n->rrlist);
+	md_tree *node = md_tree_get_leaf(root, ldns_rdf2str(ldns_rr_owner(rr)));
+	if (node->rrlist == 0) {
+		node->rrlist = ldns_rr_list_new();
+		assert(node->rrlist);
 	}
 #if DEBUG
-	fprintf(stderr, "%s(%d): md_node_add_rr depth %u branch %u\n", __FILE__,__LINE__,n->depth, n->branch);
+	fprintf(stderr, "%s(%d): md_tree_add_rr depth %u branch %u\n", __FILE__,__LINE__,node->depth, node->branch);
 #endif
-	return ldns_rr_list_push_rr(n->rrlist, rr);
+	return ldns_rr_list_push_rr(node->rrlist, rr);
 }
 
 void
-md_node_del_rr(md_node *root, ldns_rr *del_rr)
+md_tree_del_rr(md_tree *root, ldns_rr *del_rr)
 {
 	unsigned int i;
-	md_node *n = md_node_get_leaf(root, ldns_rdf2str(ldns_rr_owner(del_rr)));
-	assert(n->kids == 0);	/* leaf nodes don't have kids */
-	assert(n->rrlist);
-	fprintf(stderr, "%s(%d): md_node_del_rr:  at depth %u on branch %u\n", __FILE__,__LINE__,n->depth, n->branch);
+	md_tree *node = md_tree_get_leaf(root, ldns_rdf2str(ldns_rr_owner(del_rr)));
+	assert(node->rrlist);
+	fprintf(stderr, "%s(%d): md_tree_del_rr:  at depth %u on branch %u\n", __FILE__,__LINE__,node->depth, node->branch);
 	ldns_rr_list *new = ldns_rr_list_new();
-	ldns_rr_list *old = n->rrlist;
+	ldns_rr_list *old = node->rrlist;
 	
 	assert(new);
 	for (i = 0; i < ldns_rr_list_rr_count(old); i++) {
 		ldns_rr *rr = ldns_rr_list_rr(old, i);
 		if (del_rr == rr) {
-			fprintf(stderr, "%s(%d): md_node_del_rr: removed RR\n", __FILE__, __LINE__);
+			fprintf(stderr, "%s(%d): md_tree_del_rr: removed RR\n", __FILE__, __LINE__);
 			continue;
 		}
 		ldns_rr_list_push_rr(new, rr);
 	}
 	ldns_rr_list_free(old);
-	n->rrlist = new;
+	node->rrlist = new;
 }
 
 void
-md_node_calc_digest(const md_node *n, const EVP_MD *md, unsigned char *buf)
+md_tree_calc_digest(const md_tree *node, const EVP_MD *md, unsigned char *buf)
 {
 	EVP_MD_CTX *ctx;
 #if DEBUG
-	fprintf(stderr, "%s(%d): md_node_calc_digest depth %u branch %u\n", __FILE__,__LINE__,n->depth, n->branch);
+	fprintf(stderr, "%s(%d): md_tree_calc_digest depth %u branch %u\n", __FILE__,__LINE__,node->depth, node->branch);
 #endif
 	ctx = EVP_MD_CTX_create();
 	assert(ctx);
 	if (!EVP_DigestInit(ctx, md))
 		errx(1, "%s(%d): Digest init failed", __FILE__, __LINE__);
-	if (md_max_depth > n->depth) {
+	if (md_max_depth > node->depth) {
 		unsigned int branch;
 		unsigned char *sub_buf = calloc(EVP_MD_size(md), 1);
 		assert(sub_buf);
-		assert(n->kids);
+		assert(node->kids);
 		for (branch = 0; branch < md_max_branch; branch++) {
-			if (n->kids[branch] == 0)
+			if (node->kids[branch] == 0)
 				continue;
-			md_node_calc_digest(n->kids[branch], md, sub_buf);
+			md_tree_calc_digest(node->kids[branch], md, sub_buf);
 			if (!EVP_DigestUpdate(ctx, sub_buf, EVP_MD_size(md)))
                         	errx(1, "%s(%d): Digest update failed", __FILE__, __LINE__);
 		}
 	} else {
 		unsigned int i;
-		assert(n->rrlist);
-		ldns_rr_list_sort(n->rrlist);
-        	for (i = 0; i < ldns_rr_list_rr_count(n->rrlist); i++) {
+		assert(node->rrlist);
+		ldns_rr_list_sort(node->rrlist);
+        	for (i = 0; i < ldns_rr_list_rr_count(node->rrlist); i++) {
                 	uint8_t *wire_buf;
                 	size_t sz;
 			ldns_status status;
-                	ldns_rr *rr = ldns_rr_list_rr(n->rrlist, i);
+                	ldns_rr *rr = ldns_rr_list_rr(node->rrlist, i);
 #if DEBUG
-			fprintf(stderr, "%s(%d): md_node_calc_digest RR#%u: ", __FILE__,__LINE__,i);
+			fprintf(stderr, "%s(%d): md_tree_calc_digest RR#%u: ", __FILE__,__LINE__,i);
 			ldns_rr_print(stderr, rr);
 #endif
                 	if (ldns_rr_get_type(rr) == LDNS_RR_TYPE_RRSIG)
