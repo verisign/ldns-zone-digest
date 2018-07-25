@@ -648,12 +648,12 @@ md_node_get_leaf(md_node *n, const char *name)
 		if (n->kids == 0) {
 			n->kids = calloc(md_max_branch, sizeof(*n->kids));
 			assert(n->kids);
-			if (n->kids[branch] == 0) {
-				n->kids[branch] = calloc(1, sizeof(**n->kids));
-				assert(n->kids[branch]);
-				n->kids[branch]->depth = n->depth+1;
-				n->kids[branch]->branch = branch;
-			}
+		}
+		if (n->kids[branch] == 0) {
+			n->kids[branch] = calloc(1, sizeof(**n->kids));
+			assert(n->kids[branch]);
+			n->kids[branch]->depth = n->depth+1;
+			n->kids[branch]->branch = branch;
 		}
 		return md_node_get_leaf(n->kids[branch], name);
 	}
