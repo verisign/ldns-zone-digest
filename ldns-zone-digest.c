@@ -640,11 +640,28 @@ main(int argc, char *argv[])
 
 #if ZONEMD_INCREMENTAL
 
+unsigned int
+md_node_branch_by_name(unsigned int depth, const char *name)
+{
+	unsigned int len;
+	unsigned int pos;
+	unsigned int branch;
+	len = strlen(name);
+	if (len == 0)
+		return 0;
+	pos = depth % len;
+	branch = *(name+pos) % md_max_branch;
+#if DEBUG
+	fprintf(stderr, "%s(%d): md_node_branch_by_name '%s' depth %u pos %u branch %u\n", __FILE__,__LINE__,name, depth, pos, branch);
+#endif
+	return branch;
+}
+
 md_node *
 md_node_get_leaf(md_node *n, const char *name)
 {
 	if (md_max_depth > n->depth) {
-		unsigned int branch = 5;
+		unsigned int branch = md_node_branch_by_name(n->depth, name);
 		if (n->kids == 0) {
 			n->kids = calloc(md_max_branch, sizeof(*n->kids));
 			assert(n->kids);
