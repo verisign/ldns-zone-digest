@@ -657,7 +657,9 @@ md_node_get_leaf(md_node *n, const char *name)
 		}
 		return md_node_get_leaf(n->kids[branch], name);
 	}
-	//fprintf(stderr, "%s(%d): md_node_get_leaf depth %u branch %u\n", __FILE__,__LINE__,n->depth, n->branch);
+#if DEBUG
+	fprintf(stderr, "%s(%d): md_node_get_leaf depth %u branch %u\n", __FILE__,__LINE__,n->depth, n->branch);
+#endif
 	return n;
 }
 
@@ -670,7 +672,9 @@ md_node_add_rr(md_node *root, ldns_rr *rr)
 		n->rrlist = ldns_rr_list_new();
 		assert(n->rrlist);
 	}
-	//fprintf(stderr, "%s(%d): md_node_add_rr depth %u branch %u\n", __FILE__,__LINE__,n->depth, n->branch);
+#if DEBUG
+	fprintf(stderr, "%s(%d): md_node_add_rr depth %u branch %u\n", __FILE__,__LINE__,n->depth, n->branch);
+#endif
 	return ldns_rr_list_push_rr(n->rrlist, rr);
 }
 
@@ -701,8 +705,11 @@ md_node_del_rr(md_node *root, ldns_rr *del_rr)
 void
 md_node_calc_digest(const md_node *n, const EVP_MD *md, unsigned char *buf)
 {
-	EVP_MD_CTX *ctx = EVP_MD_CTX_create();
+	EVP_MD_CTX *ctx;
+#if DEBUG
 	fprintf(stderr, "%s(%d): md_node_calc_digest depth %u branch %u\n", __FILE__,__LINE__,n->depth, n->branch);
+#endif
+	ctx = EVP_MD_CTX_create();
 	assert(ctx);
 	if (!EVP_DigestInit(ctx, md))
 		errx(1, "%s(%d): Digest init failed", __FILE__, __LINE__);
@@ -727,8 +734,10 @@ md_node_calc_digest(const md_node *n, const EVP_MD *md, unsigned char *buf)
                 	size_t sz;
 			ldns_status status;
                 	ldns_rr *rr = ldns_rr_list_rr(n->rrlist, i);
-			//fprintf(stderr, "%s(%d): md_node_calc_digest RR#%u: ", __FILE__,__LINE__,i);
-			//ldns_rr_print(stderr, rr);
+#if DEBUG
+			fprintf(stderr, "%s(%d): md_node_calc_digest RR#%u: ", __FILE__,__LINE__,i);
+			ldns_rr_print(stderr, rr);
+#endif
                 	if (ldns_rr_get_type(rr) == LDNS_RR_TYPE_RRSIG)
                         	if (my_typecovered(rr) == LDNS_RR_TYPE_ZONEMD)
                                 	continue;
