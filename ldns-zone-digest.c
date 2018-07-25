@@ -225,7 +225,6 @@ zonemd_read_zone(const char *origin_str, FILE * fp, uint32_t ttl, ldns_rr_class 
 		}
 		ldns_rr_list_push_rr(newlist, rr);
 #if ZONEMD_INCREMENTAL
-		fprintf(stderr, "%s(%d): zonemd_read_zone\n", __FILE__,__LINE__);
 		md_node_add_rr(theRoot, rr);
 #endif
 	}
@@ -658,7 +657,7 @@ md_node_get_leaf(md_node *n, const char *name)
 		}
 		return md_node_get_leaf(n->kids[branch], name);
 	}
-	fprintf(stderr, "%s(%d): md_node_get_leaf depth %u branch %u\n", __FILE__,__LINE__,n->depth, n->branch);
+	//fprintf(stderr, "%s(%d): md_node_get_leaf depth %u branch %u\n", __FILE__,__LINE__,n->depth, n->branch);
 	return n;
 }
 
@@ -671,7 +670,7 @@ md_node_add_rr(md_node *root, ldns_rr *rr)
 		n->rrlist = ldns_rr_list_new();
 		assert(n->rrlist);
 	}
-	fprintf(stderr, "%s(%d): md_node_add_rr depth %u branch %u\n", __FILE__,__LINE__,n->depth, n->branch);
+	//fprintf(stderr, "%s(%d): md_node_add_rr depth %u branch %u\n", __FILE__,__LINE__,n->depth, n->branch);
 	return ldns_rr_list_push_rr(n->rrlist, rr);
 }
 
@@ -728,8 +727,8 @@ md_node_calc_digest(const md_node *n, const EVP_MD *md, unsigned char *buf)
                 	size_t sz;
 			ldns_status status;
                 	ldns_rr *rr = ldns_rr_list_rr(n->rrlist, i);
-			fprintf(stderr, "%s(%d): md_node_calc_digest RR#%u: ", __FILE__,__LINE__,i);
-			ldns_rr_print(stderr, rr);
+			//fprintf(stderr, "%s(%d): md_node_calc_digest RR#%u: ", __FILE__,__LINE__,i);
+			//ldns_rr_print(stderr, rr);
                 	if (ldns_rr_get_type(rr) == LDNS_RR_TYPE_RRSIG)
                         	if (my_typecovered(rr) == LDNS_RR_TYPE_ZONEMD)
                                 	continue;
