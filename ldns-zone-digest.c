@@ -48,6 +48,23 @@ const ldns_rr_type LDNS_RR_TYPE_ZONEMD = 65317;
 const char *RRNAME = "ZONEMD";
 static ldns_rdf *origin = 0;
 
+#if ZONEMD_INCREMENTAL
+typedef struct _md_node {
+        unsigned int depth;
+        unsigned int branch;    // only for debugging?
+        ldns_rr_list *rrlist;
+        struct _md_node **kids;
+} md_node;
+
+md_node * md_node_get_leaf(md_node *n, const char *name);
+bool md_node_add_rr(md_node *root, ldns_rr *rr); 
+void md_node_del_rr(md_node *root, ldns_rr *rr); 
+void md_node_calc_digest(const md_node *n, const EVP_MD *md, unsigned char *buf);
+
+md_node *theRoot = 0;
+#endif
+
+
 void zonemd_print_digest(FILE *, const char *, const unsigned char *, unsigned int, const char *);
 
 /*
@@ -205,12 +222,21 @@ zonemd_read_zone(const char *origin_str, FILE * fp, uint32_t ttl, ldns_rr_class 
 			continue;
 		}
 		ldns_rr_list_push_rr(newlist, rr);
+#if ZONEMD_INCREMENTAL
+		fprintf(stderr, "%s(%d): zonemd_read_zone\n", __FILE__,__LINE__);
+		md_node_add_rr(theRoot, rr);
+#endif
 	}
 	/*
 	 * ldns_zone_new_frm_fp() doesn't put the SOA into the rr
 	 * list, but if we add it here it sticks around.
 	 */
-	ldns_rr_list_push_rr(newlist, ldns_rr_clone(ldns_zone_soa(zone)));
+	ldns_rr *soa = ldns_rr_clone(ldns_zone_soa(zone));
+	ldns_rr_list_push_rr(newlist, soa);
+#if ZONEMD_INCREMENTAL
+	md_node_add_rr(theRoot, soa);
+#endif
+
 	fprintf(stderr, "%zu records\n", ldns_rr_list_rr_count(newlist));
 	ldns_zone_set_rrs(zone, newlist);
 	ldns_rr_list_deep_free(tbflist);
@@ -232,36 +258,40 @@ my_typecovered(ldns_rr *rrsig)
 }
 
 /*
- * zonemd_filter_rr_list()
+ * zonemd_remove_rr()
  *
- * Filter out RRs of type 'type' from the input.  If 'type' is RRISG then
- * signatures of type 'covered' are filtered.
+ * Remove RRs of type 'type' from the zone.  If 'type' is RRISG then
+ * signatures of type 'covered' are removed.
  */
-ldns_rr_list *
-zonemd_filter_rr_list(ldns_rr_list *input, ldns_rr_type type, ldns_rr_type covered)
+void
+zonemd_remove_rr(ldns_zone *zone, ldns_rr_type type, ldns_rr_type covered)
 {
 	unsigned int i;
-	ldns_rr_list *output = 0;
+	ldns_rr_list *old = ldns_zone_rrs(zone);
+	ldns_rr_list *new = 0;
 	ldns_rr_list *tbd = 0;
 
-	output = ldns_rr_list_new();
+	new = ldns_rr_list_new();
 	tbd = ldns_rr_list_new();
-	assert(output);
+	assert(new);
 	assert(tbd);
 
-	for (i = 0; i < ldns_rr_list_rr_count(input); i++) {
-		ldns_rr *rr = ldns_rr_list_rr(input, i);
+	for (i = 0; i < ldns_rr_list_rr_count(old); i++) {
+		ldns_rr *rr = ldns_rr_list_rr(old, i);
 		if (ldns_rr_get_type(rr) != type) {
-			ldns_rr_list_push_rr(output, rr);
+			ldns_rr_list_push_rr(new, rr);
 		} else if (type == LDNS_RR_TYPE_RRSIG && my_typecovered(rr) != covered) {
-			ldns_rr_list_push_rr(output, rr);
+			ldns_rr_list_push_rr(new, rr);
 		} else {
 			ldns_rr_list_push_rr(tbd, rr);
+#if ZONEMD_INCREMENTAL
+			md_node_del_rr(theRoot, rr);
+#endif
 		}
 	}
+	ldns_rr_list_free(old);
+	ldns_zone_set_rrs(zone, new);
 	ldns_rr_list_deep_free(tbd);
-
-	return output;
 }
 
 /*
@@ -274,14 +304,13 @@ void
 zonemd_add_placeholder(ldns_zone * zone, uint8_t digest_type, unsigned int digest_len)
 {
 	unsigned char *digest_buf = 0;
-	ldns_rr_list *rrlist = 0;
 	ldns_rr *soa = 0;
 	ldns_rdf *soa_serial_rdf = 0;
 	uint32_t soa_serial;
 	ldns_rr *zonemd = 0;
 
-	fprintf(stderr, "Remove existing ZONEMD...");
-	rrlist = zonemd_filter_rr_list(ldns_zone_rrs(zone), LDNS_RR_TYPE_ZONEMD, 0);
+	fprintf(stderr, "Remove existing ZONEMD...\n");
+	zonemd_remove_rr(zone, LDNS_RR_TYPE_ZONEMD, 0);
 
 	soa = ldns_zone_soa(zone);
 	soa_serial_rdf = ldns_rr_rdf(soa, 2);
@@ -291,11 +320,13 @@ zonemd_add_placeholder(ldns_zone * zone, uint8_t digest_type, unsigned int diges
 	assert(digest_buf);
 	zonemd = zonemd_pack(ldns_rr_owner(soa), ldns_rr_ttl(soa), soa_serial, digest_type, digest_buf, digest_len);
 	free(digest_buf);
-	ldns_rr_list_push_rr(rrlist, zonemd);
 
-	ldns_rr_list_free(ldns_zone_rrs(zone));
-	ldns_zone_set_rrs(zone, rrlist);
-	fprintf(stderr, "Done\n");
+	fprintf(stderr, "Add placeholder ZONEMD...\n");
+	ldns_rr_list_push_rr(ldns_zone_rrs(zone), zonemd);
+#if ZONEMD_INCREMENTAL
+	md_node_add_rr(theRoot, zonemd);
+#endif
+
 }
 
 /*
@@ -381,7 +412,7 @@ zonemd_resign(ldns_rr * rr, const char *zsk_fname, ldns_zone *zone)
 	if (rrsig == 0)
 		errx(1, "%s(%d): ldns_sign_public() failed", __FILE__, __LINE__);
 
-	rrlist = zonemd_filter_rr_list(ldns_zone_rrs(zone), LDNS_RR_TYPE_RRSIG, LDNS_RR_TYPE_ZONEMD);
+	zonemd_remove_rr(zone, LDNS_RR_TYPE_RRSIG, LDNS_RR_TYPE_ZONEMD);
 	assert(rrlist);
 	ldns_rr_list_push_rr_list(rrlist, rrsig);
 	ldns_rr_list_free(ldns_zone_rrs(zone));
@@ -513,6 +544,11 @@ main(int argc, char *argv[])
 			err(1, "%s(%d): %s", __FILE__, __LINE__, argv[1]);
 	}
 
+#if ZONEMD_INCREMENTAL
+	theRoot = calloc(1, sizeof(*theRoot));
+	assert(theRoot);
+#endif
+
 	theZone = zonemd_read_zone(origin_str, input, 0, LDNS_RR_CLASS_IN);
 	if (placeholder) {
 		const EVP_MD *md = zonemd_digester(placeholder);
@@ -530,7 +566,11 @@ main(int argc, char *argv[])
 		md_len = EVP_MD_size(md);
 		md_buf = calloc(1, md_len);
 		assert(md_buf);
+#if ZONEMD_INCREMENTAL
+		md_node_calc_digest(theRoot, md, md_buf);
+#else
 		zonemd_calc_digest(theZone, md, md_buf);
+#endif
 		zonemd_update_digest(zonemd_rr, found_digest_type, md_buf, md_len);
 		if (zsk_fname)
 			zonemd_resign(zonemd_rr, zsk_fname, theZone);
@@ -562,7 +602,11 @@ main(int argc, char *argv[])
 		md_len = EVP_MD_size(md);
 		md_buf = calloc(1, md_len);
 		zonemd_update_digest(zonemd_rr, found_digest_type, md_buf, md_len);
+#if ZONEMD_INCREMENTAL
+		md_node_calc_digest(theRoot, md, md_buf);
+#else
 		zonemd_calc_digest(theZone, md, md_buf);
+#endif
 		if (memcmp(found_digest_buf, md_buf, md_len) != 0) {
 			fprintf(stderr, "Found and calculated digests do NOT match.\n");
 			zonemd_print_digest(stderr, "Found     : ", found_digest_buf, md_len, "\n");
@@ -583,3 +627,115 @@ main(int argc, char *argv[])
 
 	return rc;
 }
+
+
+#if ZONEMD_INCREMENTAL
+unsigned int md_max_depth = 0;
+unsigned int md_max_branch = 13;
+
+md_node *
+md_node_get_leaf(md_node *n, const char *name)
+{
+	if (md_max_depth > n->depth) {
+		unsigned int branch = 5;
+		if (n->kids == 0) {
+			n->kids = calloc(md_max_branch, sizeof(*n->kids));
+			assert(n->kids);
+			if (n->kids[branch] == 0) {
+				n->kids[branch] = calloc(1, sizeof(**n->kids));
+				assert(n->kids[branch]);
+				n->kids[branch]->depth = n->depth+1;
+				n->kids[branch]->branch = branch;
+			}
+		}
+		return md_node_get_leaf(n->kids[branch], name);
+	}
+	fprintf(stderr, "%s(%d): md_node_get_leaf depth %u branch %u\n", __FILE__,__LINE__,n->depth, n->branch);
+	return n;
+}
+
+bool
+md_node_add_rr(md_node *root, ldns_rr *rr)
+{
+	md_node *n = md_node_get_leaf(root, ldns_rdf2str(ldns_rr_owner(rr)));
+	assert(n->kids == 0);	/* leaf nodes don't have kids */
+	if (n->rrlist == 0) {
+		n->rrlist = ldns_rr_list_new();
+		assert(n->rrlist);
+	}
+	fprintf(stderr, "%s(%d): md_node_add_rr depth %u branch %u\n", __FILE__,__LINE__,n->depth, n->branch);
+	return ldns_rr_list_push_rr(n->rrlist, rr);
+}
+
+void
+md_node_del_rr(md_node *root, ldns_rr *del_rr)
+{
+	unsigned int i;
+	md_node *n = md_node_get_leaf(root, ldns_rdf2str(ldns_rr_owner(del_rr)));
+	assert(n->kids == 0);	/* leaf nodes don't have kids */
+	assert(n->rrlist);
+	fprintf(stderr, "%s(%d): md_node_del_rr:  at depth %u on branch %u\n", __FILE__,__LINE__,n->depth, n->branch);
+	ldns_rr_list *new = ldns_rr_list_new();
+	ldns_rr_list *old = n->rrlist;
+	
+	assert(new);
+	for (i = 0; i < ldns_rr_list_rr_count(old); i++) {
+		ldns_rr *rr = ldns_rr_list_rr(old, i);
+		if (del_rr == rr) {
+			fprintf(stderr, "%s(%d): md_node_del_rr: removed RR\n", __FILE__, __LINE__);
+			continue;
+		}
+		ldns_rr_list_push_rr(new, rr);
+	}
+	ldns_rr_list_free(old);
+	n->rrlist = new;
+}
+
+void
+md_node_calc_digest(const md_node *n, const EVP_MD *md, unsigned char *buf)
+{
+	EVP_MD_CTX *ctx = EVP_MD_CTX_create();
+	fprintf(stderr, "%s(%d): md_node_calc_digest depth %u branch %u\n", __FILE__,__LINE__,n->depth, n->branch);
+	assert(ctx);
+	if (!EVP_DigestInit(ctx, md))
+		errx(1, "%s(%d): Digest init failed", __FILE__, __LINE__);
+	if (md_max_depth > n->depth) {
+		unsigned int branch;
+		unsigned char *sub_buf = calloc(EVP_MD_size(md), 1);
+		assert(sub_buf);
+		assert(n->kids);
+		for (branch = 0; branch < md_max_branch; branch++) {
+			if (n->kids[branch] == 0)
+				continue;
+			md_node_calc_digest(n->kids[branch], md, sub_buf);
+			if (!EVP_DigestUpdate(ctx, sub_buf, EVP_MD_size(md)))
+                        	errx(1, "%s(%d): Digest update failed", __FILE__, __LINE__);
+		}
+	} else {
+		unsigned int i;
+		assert(n->rrlist);
+		ldns_rr_list_sort(n->rrlist);
+        	for (i = 0; i < ldns_rr_list_rr_count(n->rrlist); i++) {
+                	uint8_t *wire_buf;
+                	size_t sz;
+			ldns_status status;
+                	ldns_rr *rr = ldns_rr_list_rr(n->rrlist, i);
+			fprintf(stderr, "%s(%d): md_node_calc_digest RR#%u: ", __FILE__,__LINE__,i);
+			ldns_rr_print(stderr, rr);
+                	if (ldns_rr_get_type(rr) == LDNS_RR_TYPE_RRSIG)
+                        	if (my_typecovered(rr) == LDNS_RR_TYPE_ZONEMD)
+                                	continue;
+                	status = ldns_rr2wire(&wire_buf, rr, LDNS_SECTION_ANSWER, &sz);
+                	if (status != LDNS_STATUS_OK)
+                        	errx(1, "%s(%d): ldns_rr2wire() failed", __FILE__, __LINE__);
+                	if (!EVP_DigestUpdate(ctx, wire_buf, sz))
+                        	errx(1, "%s(%d): Digest update failed", __FILE__, __LINE__);
+                	free(wire_buf);
+        	}
+	}
+	if (!EVP_DigestFinal_ex(ctx, buf, 0))
+		errx(1, "%s(%d): Digest final failed", __FILE__, __LINE__);
+	EVP_MD_CTX_destroy(ctx);
+}
+
+#endif
