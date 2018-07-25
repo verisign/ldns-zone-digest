@@ -53,6 +53,7 @@ typedef struct _md_tree {
 	unsigned int depth;
 	unsigned int branch;    // only for debugging?
 	ldns_rr_list *rrlist;
+	struct _md_tree *parent;
 	struct _md_tree **kids;
 	unsigned char digest[EVP_MAX_MD_SIZE];
 } md_tree;
@@ -677,6 +678,7 @@ md_tree_get_leaf(md_tree *node, const char *name)
 			assert(node->kids[branch]);
 			node->kids[branch]->depth = node->depth+1;
 			node->kids[branch]->branch = branch;
+			node->kids[branch]->parent = node;
 		}
 		return md_tree_get_leaf(node->kids[branch], name);
 	}
