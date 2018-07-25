@@ -50,10 +50,10 @@ static ldns_rdf *origin = 0;
 
 #if ZONEMD_INCREMENTAL
 typedef struct _md_tree {
-        unsigned int depth;
-        unsigned int branch;    // only for debugging?
-        ldns_rr_list *rrlist;
-        struct _md_tree **kids;
+	unsigned int depth;
+	unsigned int branch;    // only for debugging?
+	ldns_rr_list *rrlist;
+	struct _md_tree **kids;
 } md_tree;
 
 md_tree * md_tree_get_leaf(md_tree *node, const char *name);
@@ -739,31 +739,31 @@ md_tree_calc_digest(const md_tree *node, const EVP_MD *md, unsigned char *buf)
 				continue;
 			md_tree_calc_digest(node->kids[branch], md, sub_buf);
 			if (!EVP_DigestUpdate(ctx, sub_buf, EVP_MD_size(md)))
-                        	errx(1, "%s(%d): Digest update failed", __FILE__, __LINE__);
+				errx(1, "%s(%d): Digest update failed", __FILE__, __LINE__);
 		}
 	} else {
 		unsigned int i;
 		assert(node->rrlist);
 		ldns_rr_list_sort(node->rrlist);
-        	for (i = 0; i < ldns_rr_list_rr_count(node->rrlist); i++) {
-                	uint8_t *wire_buf;
-                	size_t sz;
+		for (i = 0; i < ldns_rr_list_rr_count(node->rrlist); i++) {
+			uint8_t *wire_buf;
+			size_t sz;
 			ldns_status status;
-                	ldns_rr *rr = ldns_rr_list_rr(node->rrlist, i);
+			ldns_rr *rr = ldns_rr_list_rr(node->rrlist, i);
 #if DEBUG
 			fprintf(stderr, "%s(%d): md_tree_calc_digest RR#%u: ", __FILE__,__LINE__,i);
 			ldns_rr_print(stderr, rr);
 #endif
-                	if (ldns_rr_get_type(rr) == LDNS_RR_TYPE_RRSIG)
-                        	if (my_typecovered(rr) == LDNS_RR_TYPE_ZONEMD)
-                                	continue;
-                	status = ldns_rr2wire(&wire_buf, rr, LDNS_SECTION_ANSWER, &sz);
-                	if (status != LDNS_STATUS_OK)
-                        	errx(1, "%s(%d): ldns_rr2wire() failed", __FILE__, __LINE__);
-                	if (!EVP_DigestUpdate(ctx, wire_buf, sz))
-                        	errx(1, "%s(%d): Digest update failed", __FILE__, __LINE__);
-                	free(wire_buf);
-        	}
+			if (ldns_rr_get_type(rr) == LDNS_RR_TYPE_RRSIG)
+				if (my_typecovered(rr) == LDNS_RR_TYPE_ZONEMD)
+					continue;
+			status = ldns_rr2wire(&wire_buf, rr, LDNS_SECTION_ANSWER, &sz);
+			if (status != LDNS_STATUS_OK)
+				errx(1, "%s(%d): ldns_rr2wire() failed", __FILE__, __LINE__);
+			if (!EVP_DigestUpdate(ctx, wire_buf, sz))
+				errx(1, "%s(%d): Digest update failed", __FILE__, __LINE__);
+			free(wire_buf);
+		}
 	}
 	if (!EVP_DigestFinal_ex(ctx, buf, 0))
 		errx(1, "%s(%d): Digest final failed", __FILE__, __LINE__);
