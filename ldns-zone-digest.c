@@ -58,7 +58,7 @@ typedef struct _md_tree {
 	unsigned char digest[EVP_MAX_MD_SIZE];
 } md_tree;
 
-md_tree * md_tree_get_leaf(md_tree *node, const char *name);
+md_tree * md_tree_get_leaf_by_name(md_tree *node, const char *name);
 bool md_tree_add_rr(md_tree *root, ldns_rr *rr); 
 void md_tree_del_rr(md_tree *root, ldns_rr *rr); 
 void md_tree_calc_digest(const md_tree *node, const EVP_MD *md, unsigned char *buf);
@@ -636,6 +636,7 @@ main(int argc, char *argv[])
 		} else {
 			fprintf(stderr, "Found and calculated digests do MATCH.\n");
 		}
+		free(md_buf);
 	}
 	if (placeholder || calculate)
 		zonemd_write_zone(theZone, stdout);
@@ -668,7 +669,7 @@ md_tree_branch_by_name(unsigned int depth, const char *name)
 }
 
 md_tree *
-md_tree_get_leaf(md_tree *node, const char *name)
+md_tree_get_leaf_by_name(md_tree *node, const char *name)
 {
 	if (md_max_depth > node->depth) {
 		unsigned int branch = md_tree_branch_by_name(node->depth, name);
@@ -683,17 +684,28 @@ md_tree_get_leaf(md_tree *node, const char *name)
 			node->kids[branch]->branch = branch;
 			node->kids[branch]->parent = node;
 		}
-		return md_tree_get_leaf(node->kids[branch], name);
+		return md_tree_get_leaf_by_name(node->kids[branch], name);
 	}
 	fdebugf(stderr, "%s(%d): md_tree_get_leaf depth %u branch %u\n", __FILE__,__LINE__,node->depth, node->branch);
-	assert(node->kids == 0);	/* leaf nodes don't have kids */
 	return node;
+}
+
+md_tree *
+md_tree_get_leaf_by_owner(md_tree *node, const ldns_rdf *owner)
+{
+	md_tree *leaf;
+	char *name = ldns_rdf2str(owner);
+	assert(name);
+	leaf = md_tree_get_leaf_by_name(node, name);
+	assert(leaf->kids == 0);	/* leaf nodes don't have kids */
+	free(name);
+	return leaf;
 }
 
 bool
 md_tree_add_rr(md_tree *root, ldns_rr *rr)
 {
-	md_tree *node = md_tree_get_leaf(root, ldns_rdf2str(ldns_rr_owner(rr)));
+	md_tree *node = md_tree_get_leaf_by_owner(root, ldns_rr_owner(rr));
 	if (node->rrlist == 0) {
 		node->rrlist = ldns_rr_list_new();
 		assert(node->rrlist);
@@ -706,7 +718,7 @@ void
 md_tree_del_rr(md_tree *root, ldns_rr *del_rr)
 {
 	unsigned int i;
-	md_tree *node = md_tree_get_leaf(root, ldns_rdf2str(ldns_rr_owner(del_rr)));
+	md_tree *node = md_tree_get_leaf_by_owner(root, ldns_rr_owner(del_rr));
 	assert(node->rrlist);
 	fprintf(stderr, "%s(%d): md_tree_del_rr:  at depth %u on branch %u\n", __FILE__,__LINE__,node->depth, node->branch);
 	ldns_rr_list *new = ldns_rr_list_new();
