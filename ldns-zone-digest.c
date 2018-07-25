@@ -54,6 +54,7 @@ typedef struct _md_tree {
 	unsigned int branch;    // only for debugging?
 	ldns_rr_list *rrlist;
 	struct _md_tree **kids;
+	unsigned char digest[EVP_MAX_MD_SIZE];
 } md_tree;
 
 md_tree * md_tree_get_leaf(md_tree *node, const char *name);
@@ -577,11 +578,12 @@ main(int argc, char *argv[])
 			errx(1, "%s(%d): No %s record found in zone.  Use -p to add one.", __FILE__, __LINE__, RRNAME);
 		md = zonemd_digester(found_digest_type);
 		md_len = EVP_MD_size(md);
-		md_buf = calloc(1, md_len);
-		assert(md_buf);
 #if ZONEMD_INCREMENTAL
+		md_buf = theTree->digest;
 		md_tree_calc_digest(theTree, md, md_buf);
 #else
+		md_buf = calloc(1, md_len);
+		assert(md_buf);
 		zonemd_calc_digest(theZone, md, md_buf);
 #endif
 		zonemd_update_digest(zonemd_rr, found_digest_type, md_buf, md_len);
@@ -735,14 +737,12 @@ md_tree_calc_digest(const md_tree *node, const EVP_MD *md, unsigned char *buf)
 		errx(1, "%s(%d): Digest init failed", __FILE__, __LINE__);
 	if (md_max_depth > node->depth) {
 		unsigned int branch;
-		unsigned char *sub_buf = calloc(EVP_MD_size(md), 1);
-		assert(sub_buf);
 		assert(node->kids);
 		for (branch = 0; branch < md_max_branch; branch++) {
 			if (node->kids[branch] == 0)
 				continue;
-			md_tree_calc_digest(node->kids[branch], md, sub_buf);
-			if (!EVP_DigestUpdate(ctx, sub_buf, EVP_MD_size(md)))
+			md_tree_calc_digest(node->kids[branch], md, (unsigned char *) node->digest);
+			if (!EVP_DigestUpdate(ctx, node->digest, EVP_MD_size(md)))
 				errx(1, "%s(%d): Digest update failed", __FILE__, __LINE__);
 		}
 	} else {
