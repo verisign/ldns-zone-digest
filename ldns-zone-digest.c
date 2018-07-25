@@ -62,6 +62,8 @@ void md_node_del_rr(md_node *root, ldns_rr *rr);
 void md_node_calc_digest(const md_node *n, const EVP_MD *md, unsigned char *buf);
 
 md_node *theRoot = 0;
+unsigned int md_max_depth = 0;
+unsigned int md_max_branch = 13;
 #endif
 
 
@@ -493,6 +495,8 @@ usage(const char *p)
 	fprintf(stderr, "\t-p type\t\tinsert placeholder record of type (1, 2, 4)\n");
 	fprintf(stderr, "\t-v\t\tverify the zone digest\n");
 	fprintf(stderr, "\t-z\t\tZSK file name\n");
+	fprintf(stderr, "\t-B\t\tBranch width of hash tree\n");
+	fprintf(stderr, "\t-D\t\tDepth of hash tree\n");
 	exit(2);
 }
 
@@ -515,7 +519,7 @@ main(int argc, char *argv[])
 	if (0 == progname)
 		progname = argv[0];
 
-	while ((ch = getopt(argc, argv, "cp:vz:")) != -1) {
+	while ((ch = getopt(argc, argv, "cp:vz:B:D:")) != -1) {
 		switch (ch) {
 		case 'c':
 			calculate = 1;
@@ -528,6 +532,12 @@ main(int argc, char *argv[])
 			break;
 		case 'z':
 			zsk_fname = strdup(optarg);
+			break;
+		case 'B':
+			md_max_branch = strtoul(optarg, 0, 10);
+			break;
+		case 'D':
+			md_max_depth = strtoul(optarg, 0, 10);
 			break;
 		default:
 			usage(progname);
@@ -630,8 +640,6 @@ main(int argc, char *argv[])
 
 
 #if ZONEMD_INCREMENTAL
-unsigned int md_max_depth = 0;
-unsigned int md_max_branch = 13;
 
 md_node *
 md_node_get_leaf(md_node *n, const char *name)
