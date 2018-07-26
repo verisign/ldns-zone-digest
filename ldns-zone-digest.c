@@ -160,11 +160,20 @@ zonemd_update_digest(ldns_rr * rr, uint8_t digest_type, unsigned char *digest_bu
 	buf = ldns_rdf_data(rdf);
 	assert(buf);
 
+	if (ldns_rdf_size(rdf) != 4 + 1 + digest_len)
+		errx(1, "%s(%d): zonemd_update_digest expected rdata size %u but got %u\n",
+			__FILE__, __LINE__,
+			4 + 1 + digest_len,
+			ldns_rdf_size(rdf));
+
 	memcpy(&rr_digest_type, &buf[4], 1);
 	if (rr_digest_type != digest_type)
 		errx(1, "%s(%d): zonemd_update_digest mismatched digest type.  Found %u but wanted %u.", __FILE__, __LINE__, rr_digest_type, digest_type);
 
-	memcpy(&buf[5], digest_buf, digest_len);
+	if (digest_buf)
+		memcpy(&buf[5], digest_buf, digest_len);
+	else
+		memset(&buf[5], 0, digest_len);
 	ldns_rr_push_rdf(rr, rdf);
 }
 
