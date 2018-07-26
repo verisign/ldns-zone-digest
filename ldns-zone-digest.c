@@ -498,6 +498,7 @@ usage(const char *p)
 {
 	fprintf(stderr, "usage: %s [options] origin [zonefile]\n", p);
 	fprintf(stderr, "\t-c\t\tcalculate the zone digest\n");
+	fprintf(stderr, "\t-o file\t\twrite zone to output file\n");
 	fprintf(stderr, "\t-p type\t\tinsert placeholder record of type (1, 2, 4)\n");
 	fprintf(stderr, "\t-v\t\tverify the zone digest\n");
 	fprintf(stderr, "\t-z\t\tZSK file name\n");
@@ -516,6 +517,7 @@ main(int argc, char *argv[])
 	int ch;
 	FILE *input = stdin;
 	const char *progname = 0;
+	const char *output_file = 0;
 	char *origin_str = 0;
 	char *zsk_fname = 0;
 	int placeholder = 0;
@@ -527,10 +529,13 @@ main(int argc, char *argv[])
 	if (0 == progname)
 		progname = argv[0];
 
-	while ((ch = getopt(argc, argv, "cp:vz:B:D:")) != -1) {
+	while ((ch = getopt(argc, argv, "co:p:vz:B:D:")) != -1) {
 		switch (ch) {
 		case 'c':
 			calculate = 1;
+			break;
+		case 'o':
+			output_file = strdup(optarg);
 			break;
 		case 'p':
 			placeholder = strtoul(optarg, 0, 10);
@@ -638,8 +643,13 @@ main(int argc, char *argv[])
 		}
 		free(md_buf);
 	}
-	if (placeholder || calculate)
-		zonemd_write_zone(theZone, stdout);
+	if (output_file && (placeholder || calculate)) {
+		FILE *fp = fopen(output_file, "w");
+		if (!fp)
+			err(1, "%s", output_file);
+		zonemd_write_zone(theZone, fp);
+		fclose(fp);
+	}
 
 	if (zsk_fname)
 		free(zsk_fname);
