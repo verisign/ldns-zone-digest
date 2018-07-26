@@ -162,7 +162,7 @@ zonemd_update_digest(ldns_rr * rr, uint8_t digest_type, unsigned char *digest_bu
 	assert(buf);
 
 	if (ldns_rdf_size(rdf) != 4 + 1 + digest_len)
-		errx(1, "%s(%d): zonemd_update_digest expected rdata size %u but got %u\n",
+		errx(1, "%s(%d): zonemd_update_digest expected rdata size %u but got %zu\n",
 			__FILE__, __LINE__,
 			4 + 1 + digest_len,
 			ldns_rdf_size(rdf));
