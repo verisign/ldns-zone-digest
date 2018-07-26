@@ -730,7 +730,7 @@ md_tree_del_rr(md_tree *root, ldns_rr *del_rr)
 	unsigned int i;
 	md_tree *node = md_tree_get_leaf_by_owner(root, ldns_rr_owner(del_rr));
 	assert(node->rrlist);
-	fprintf(stderr, "%s(%d): md_tree_del_rr:  at depth %u on branch %u\n", __FILE__,__LINE__,node->depth, node->branch);
+	fdebugf(stderr, "%s(%d): md_tree_del_rr: at depth %u on branch %u\n", __FILE__,__LINE__,node->depth, node->branch);
 	ldns_rr_list *new = ldns_rr_list_new();
 	ldns_rr_list *old = node->rrlist;
 	
@@ -738,7 +738,7 @@ md_tree_del_rr(md_tree *root, ldns_rr *del_rr)
 	for (i = 0; i < ldns_rr_list_rr_count(old); i++) {
 		ldns_rr *rr = ldns_rr_list_rr(old, i);
 		if (del_rr == rr) {
-			fprintf(stderr, "%s(%d): md_tree_del_rr: removed RR\n", __FILE__, __LINE__);
+			fdebugf(stderr, "%s(%d): md_tree_del_rr: removed RR\n", __FILE__, __LINE__);
 			continue;
 		}
 		ldns_rr_list_push_rr(new, rr);
