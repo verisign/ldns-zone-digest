@@ -262,6 +262,66 @@ zonemd_read_zone(const char *origin_str, FILE * fp, uint32_t ttl, ldns_rr_class 
 	return zone;
 }
 
+#if ZONEMD_INCREMENTAL
+/*
+ * zonemd_zone_update()
+ *
+ * Process incremental updates to zone data.  Input file has lines that start with 'add' or
+ * 'del' followed by an RR in presentation format:
+ *
+ * del example. IN A 1.2.3.4
+ * add example. IN A 2.3.4.5
+ *
+ */
+void
+zonemd_zone_update(const char *update_file, ldns_zone *zone)
+{
+	ldns_status status;
+	char file_buf[4096];
+	unsigned int n_add = 0;
+	unsigned int n_del = 0;
+	unsigned int line = 0;
+	FILE *fp;
+
+	fp = fopen(update_file, "r");
+	if (!fp)
+		err(1, "%s(%d): %s", __FILE__, __LINE__, update_file);
+
+	fprintf(stderr, "Updating Zone...");
+	while (fgets(file_buf, sizeof(file_buf), fp)) {
+		line++;
+		char *cmd = 0;
+		char *rr_str = 0;
+		ldns_rr *rr = 0;
+		cmd = strtok(file_buf, " \t");
+		if (cmd == 0) {
+			warnx("%s(%d): zonemd_zone_update: %s line %u unparseable input", __FILE__, __LINE__, update_file, line);
+			continue;
+		}
+		rr_str = strtok(0, "\r\n");
+		if (rr_str == 0) {
+			warnx("%s(%d): zonemd_zone_update: %s line %u unparseable input", __FILE__, __LINE__, update_file, line);
+			continue;
+		}
+		status = ldns_rr_new_frm_str(&rr, rr_str, 0, origin, 0);
+		if (status != LDNS_STATUS_OK)
+			errx(1, "%s(%d): ldns_rr_new_frm_str: %s", __FILE__, __LINE__, ldns_get_errorstr_by_id(status));
+		if (0 == strcmp(cmd, "add")) {
+			ldns_rr_list_push_rr(ldns_zone_rrs(zone), rr);
+			md_tree_add_rr(theTree, rr);
+			n_add++;
+		} else if (0 == strcmp(cmd, "del")) {
+			n_del++;
+		} else {
+			warnx("%s(%d): zonemd_zone_update: %s line %u expected 'add' or 'del'", __FILE__, __LINE__, update_file, line);
+			continue;
+		}
+	}
+	fclose(fp);
+	fprintf(stderr, "%u additions, %u deletions\n", n_add, n_del);
+}
+#endif
+
 /*
  * my_typecovered()
  *
@@ -509,6 +569,9 @@ usage(const char *p)
 	fprintf(stderr, "usage: %s [options] origin [zonefile]\n", p);
 	fprintf(stderr, "\t-c\t\tcalculate the zone digest\n");
 	fprintf(stderr, "\t-o file\t\twrite zone to output file\n");
+#if ZONEMD_INCREMENTAL
+	fprintf(stderr, "\t-u file\t\tfile containing RR updates\n");
+#endif
 	fprintf(stderr, "\t-p type\t\tinsert placeholder record of type (1, 2, 4)\n");
 	fprintf(stderr, "\t-v\t\tverify the zone digest\n");
 	fprintf(stderr, "\t-z\t\tZSK file name\n");
@@ -527,6 +590,82 @@ elapsed_msec(struct timeval *a, struct timeval *b)
 	return dt;
 }
 
+void
+do_calculate(ldns_zone *zone, const char *zsk_fname)
+{
+	uint8_t found_digest_type;
+	const EVP_MD *md = 0;
+	unsigned char *md_buf = 0;
+	unsigned int md_len = 0;
+	ldns_rr *zonemd_rr = zonemd_find(zone, 0, &found_digest_type, 0, 0);
+	if (!zonemd_rr)
+		errx(1, "%s(%d): No %s record found in zone.  Use -p to add one.", __FILE__, __LINE__, RRNAME);
+	md = zonemd_digester(found_digest_type);
+	md_len = EVP_MD_size(md);
+#if ZONEMD_INCREMENTAL
+	md_buf = theTree->digest;
+	md_tree_calc_digest(theTree, md, md_buf);
+#else
+	md_buf = calloc(1, md_len);
+	assert(md_buf);
+	zonemd_calc_digest(zone, md, md_buf);
+#endif
+	zonemd_update_digest(zonemd_rr, found_digest_type, md_buf, md_len);
+	if (zsk_fname)
+		zonemd_resign(zonemd_rr, zsk_fname, zone);
+}
+
+int
+do_verify(ldns_zone *zone)
+{
+	int rc = 0;
+	uint8_t found_digest_type;
+	unsigned char found_digest_buf[EVP_MAX_MD_SIZE];
+	uint32_t found_serial = 0;
+	ldns_rr *soa = 0;
+	ldns_rdf *soa_serial_rdf = 0;
+	uint32_t soa_serial = 0;
+	const EVP_MD *md = 0;
+	unsigned char *md_buf = 0;
+	unsigned int md_len = 0;
+	ldns_rr *zonemd_rr = zonemd_find(zone, &found_serial, &found_digest_type, found_digest_buf, sizeof(found_digest_buf));
+	if (!zonemd_rr)
+		errx(1, "%s(%d): No %s record found in zone, cannot verify.", __FILE__, __LINE__, RRNAME);
+	soa = ldns_zone_soa(zone);
+	if (!soa)
+		errx(1, "%s(%d): No SOA record found in zone, cannot verify.", __FILE__, __LINE__);
+	soa_serial_rdf = ldns_rr_rdf(soa, 2);
+	soa_serial = ldns_rdf2native_int32(soa_serial_rdf);
+	if (found_serial != soa_serial) {
+		fprintf(stderr, "%s(%d): SOA serial (%u) does not match ZONEMD serial (%u)\n", __FILE__, __LINE__, soa_serial, found_serial);
+		rc |= 1;
+	}
+	md = zonemd_digester(found_digest_type);
+	assert(EVP_MD_size(md) <= sizeof(found_digest_buf));
+	md_len = EVP_MD_size(md);
+	zonemd_update_digest(zonemd_rr, found_digest_type, 0, md_len);	/* zero digest part */
+#if ZONEMD_INCREMENTAL
+	md_buf = theTree->digest;
+	md_tree_calc_digest(theTree, md, md_buf);
+#else
+	md_buf = calloc(1, md_len);
+	assert(md_buf);
+	zonemd_calc_digest(zone, md, md_buf);
+#endif
+	if (memcmp(found_digest_buf, md_buf, md_len) != 0) {
+		fprintf(stderr, "Found and calculated digests do NOT match.\n");
+		zonemd_print_digest(stderr, "Found     : ", found_digest_buf, md_len, "\n");
+		zonemd_print_digest(stderr, "Calculated: ", md_buf, md_len, "\n");
+		rc |= 1;
+	} else {
+		fprintf(stderr, "Found and calculated digests do MATCH.\n");
+	}
+#if !ZONEMD_INCREMENTAL
+	free(md_buf);
+#endif
+	return rc;
+}
+
 int
 main(int argc, char *argv[])
 {
@@ -535,19 +674,20 @@ main(int argc, char *argv[])
 	FILE *input = stdin;
 	const char *progname = 0;
 	const char *output_file = 0;
+	const char *update_file = 0;
 	char *origin_str = 0;
 	char *zsk_fname = 0;
 	int placeholder = 0;
 	int calculate = 0;
 	int verify = 0;
 	int rc = 0;
-	struct timeval t0, t1, t2, t3;
+	struct timeval t0, t1, t2, t3, t4;
 
 	progname = strrchr(argv[0], '/');
 	if (0 == progname)
 		progname = argv[0];
 
-	while ((ch = getopt(argc, argv, "co:p:vz:B:D:")) != -1) {
+	while ((ch = getopt(argc, argv, "co:p:u:vz:B:D:")) != -1) {
 		switch (ch) {
 		case 'c':
 			calculate = 1;
@@ -557,6 +697,9 @@ main(int argc, char *argv[])
 			break;
 		case 'p':
 			placeholder = strtoul(optarg, 0, 10);
+			break;
+		case 'u':
+			update_file = strdup(optarg);
 			break;
 		case 'v':
 			verify = 1;
@@ -600,80 +743,24 @@ main(int argc, char *argv[])
 		zonemd_add_placeholder(theZone, placeholder, EVP_MD_size(md));
 	}
 	gettimeofday(&t1, 0);
-	if (calculate) {
-		uint8_t found_digest_type;
-		const EVP_MD *md = 0;
-		unsigned char *md_buf = 0;
-		unsigned int md_len = 0;
-		ldns_rr *zonemd_rr = zonemd_find(theZone, 0, &found_digest_type, 0, 0);
-		if (!zonemd_rr)
-			errx(1, "%s(%d): No %s record found in zone.  Use -p to add one.", __FILE__, __LINE__, RRNAME);
-		md = zonemd_digester(found_digest_type);
-		md_len = EVP_MD_size(md);
-#if ZONEMD_INCREMENTAL
-		md_buf = theTree->digest;
-		md_tree_calc_digest(theTree, md, md_buf);
-#else
-		md_buf = calloc(1, md_len);
-		assert(md_buf);
-		zonemd_calc_digest(theZone, md, md_buf);
-#endif
-		zonemd_update_digest(zonemd_rr, found_digest_type, md_buf, md_len);
-		if (zsk_fname)
-			zonemd_resign(zonemd_rr, zsk_fname, theZone);
-	}
+	if (calculate)
+		do_calculate(theZone, zsk_fname);
 	gettimeofday(&t2, 0);
-	if (verify) {
-		uint8_t found_digest_type;
-		unsigned char found_digest_buf[EVP_MAX_MD_SIZE];
-		uint32_t found_serial = 0;
-		ldns_rr *soa = 0;
-		ldns_rdf *soa_serial_rdf = 0;
-		uint32_t soa_serial = 0;
-		const EVP_MD *md = 0;
-		unsigned char *md_buf = 0;
-		unsigned int md_len = 0;
-		ldns_rr *zonemd_rr = zonemd_find(theZone, &found_serial, &found_digest_type, found_digest_buf, sizeof(found_digest_buf));
-		if (!zonemd_rr)
-			errx(1, "%s(%d): No %s record found in zone, cannot verify.", __FILE__, __LINE__, RRNAME);
-		soa = ldns_zone_soa(theZone);
-		if (!soa)
-			errx(1, "%s(%d): No SOA record found in zone, cannot verify.", __FILE__, __LINE__);
-		soa_serial_rdf = ldns_rr_rdf(soa, 2);
-		soa_serial = ldns_rdf2native_int32(soa_serial_rdf);
-		if (found_serial != soa_serial) {
-			fprintf(stderr, "%s(%d): SOA serial (%u) does not match ZONEMD serial (%u)\n", __FILE__, __LINE__, soa_serial, found_serial);
-			rc |= 1;
-		}
-		md = zonemd_digester(found_digest_type);
-		assert(EVP_MD_size(md) <= sizeof(found_digest_buf));
-		md_len = EVP_MD_size(md);
-		zonemd_update_digest(zonemd_rr, found_digest_type, 0, md_len);	/* zero digest part */
-#if ZONEMD_INCREMENTAL
-		md_buf = theTree->digest;
-		md_tree_calc_digest(theTree, md, md_buf);
-#else
-		md_buf = calloc(1, md_len);
-		assert(md_buf);
-		zonemd_calc_digest(theZone, md, md_buf);
-#endif
-		if (memcmp(found_digest_buf, md_buf, md_len) != 0) {
-			fprintf(stderr, "Found and calculated digests do NOT match.\n");
-			zonemd_print_digest(stderr, "Found     : ", found_digest_buf, md_len, "\n");
-			zonemd_print_digest(stderr, "Calculated: ", md_buf, md_len, "\n");
-			rc |= 1;
-		} else {
-			fprintf(stderr, "Found and calculated digests do MATCH.\n");
-		}
-#if !ZONEMD_INCREMENTAL
-		free(md_buf);
-#endif
-	}
+	if (verify)
+		rc |= do_verify(theZone);
 	gettimeofday(&t3, 0);
+#if ZONEMD_INCREMENTAL
+	if (update_file) {
+		zonemd_zone_update(update_file, theZone);
+		if (calculate)
+			do_calculate(theZone, zsk_fname);
+	}
+#endif
+	gettimeofday(&t4, 0);
 	if (output_file && (placeholder || calculate)) {
 		FILE *fp = fopen(output_file, "w");
 		if (!fp)
-			err(1, "%s", output_file);
+			err(1, "%s(%d): %s", __FILE__, __LINE__, output_file);
 		zonemd_write_zone(theZone, fp);
 		fclose(fp);
 	}
@@ -684,10 +771,11 @@ main(int argc, char *argv[])
 		free(origin_str);
 	ldns_zone_deep_free(theZone);
 
-	printf("TIMINGS: load %7.2lf calculate %7.2lf verify %7.2lf\n",
+	printf("TIMINGS: load %7.2lf calculate %7.2lf verify %7.2lf update %7.2lf\n",
 		elapsed_msec(&t0, &t1),
 		elapsed_msec(&t1, &t2),
-		elapsed_msec(&t2, &t3));
+		elapsed_msec(&t2, &t3),
+		elapsed_msec(&t3, &t4));
 
 	return rc;
 }
