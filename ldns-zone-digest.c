@@ -56,12 +56,13 @@ typedef struct _md_tree {
 	struct _md_tree *parent;
 	struct _md_tree **kids;
 	unsigned char digest[EVP_MAX_MD_SIZE];
+	bool dirty;
 } md_tree;
 
 md_tree * md_tree_get_leaf_by_name(md_tree *node, const char *name);
 bool md_tree_add_rr(md_tree *root, ldns_rr *rr); 
 void md_tree_del_rr(md_tree *root, ldns_rr *rr); 
-void md_tree_calc_digest(const md_tree *node, const EVP_MD *md, unsigned char *buf);
+void md_tree_calc_digest(md_tree *node, const EVP_MD *md, unsigned char *buf);
 
 md_tree *theTree = 0;
 unsigned int md_max_depth = 0;
@@ -624,7 +625,7 @@ main(int argc, char *argv[])
 	gettimeofday(&t2, 0);
 	if (verify) {
 		uint8_t found_digest_type;
-		unsigned char found_digest_buf[512];
+		unsigned char found_digest_buf[EVP_MAX_MD_SIZE];
 		uint32_t found_serial = 0;
 		ldns_rr *soa = 0;
 		ldns_rdf *soa_serial_rdf = 0;
@@ -647,11 +648,13 @@ main(int argc, char *argv[])
 		md = zonemd_digester(found_digest_type);
 		assert(EVP_MD_size(md) <= sizeof(found_digest_buf));
 		md_len = EVP_MD_size(md);
-		md_buf = calloc(1, md_len);
-		zonemd_update_digest(zonemd_rr, found_digest_type, md_buf, md_len);
+		zonemd_update_digest(zonemd_rr, found_digest_type, 0, md_len);	/* zero digest part */
 #if ZONEMD_INCREMENTAL
+		md_buf = theTree->digest;
 		md_tree_calc_digest(theTree, md, md_buf);
 #else
+		md_buf = calloc(1, md_len);
+		assert(md_buf);
 		zonemd_calc_digest(theZone, md, md_buf);
 #endif
 		if (memcmp(found_digest_buf, md_buf, md_len) != 0) {
@@ -662,7 +665,9 @@ main(int argc, char *argv[])
 		} else {
 			fprintf(stderr, "Found and calculated digests do MATCH.\n");
 		}
+#if !ZONEMD_INCREMENTAL
 		free(md_buf);
+#endif
 	}
 	gettimeofday(&t3, 0);
 	if (output_file && (placeholder || calculate)) {
@@ -724,6 +729,7 @@ md_tree_get_leaf_by_name(md_tree *node, const char *name)
 		return md_tree_get_leaf_by_name(node->kids[branch], name);
 	}
 	fdebugf(stderr, "%s(%d): md_tree_get_leaf depth %u branch %u\n", __FILE__,__LINE__,node->depth, node->branch);
+	node->dirty = true;
 	return node;
 }
 
@@ -775,10 +781,12 @@ md_tree_del_rr(md_tree *root, ldns_rr *del_rr)
 }
 
 void
-md_tree_calc_digest(const md_tree *node, const EVP_MD *md, unsigned char *buf)
+md_tree_calc_digest(md_tree *node, const EVP_MD *md, unsigned char *buf)
 {
 	EVP_MD_CTX *ctx;
 	fdebugf(stderr, "%s(%d): md_tree_calc_digest depth %u branch %u\n", __FILE__,__LINE__,node->depth, node->branch);
+	if (!node->dirty)
+		return;
 	ctx = EVP_MD_CTX_create();
 	assert(ctx);
 	if (!EVP_DigestInit(ctx, md))
@@ -817,6 +825,7 @@ md_tree_calc_digest(const md_tree *node, const EVP_MD *md, unsigned char *buf)
 	if (!EVP_DigestFinal_ex(ctx, buf, 0))
 		errx(1, "%s(%d): Digest final failed", __FILE__, __LINE__);
 	EVP_MD_CTX_destroy(ctx);
+	node->dirty = false;
 }
 
 #endif
