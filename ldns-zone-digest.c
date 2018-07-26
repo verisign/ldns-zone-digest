@@ -509,6 +509,13 @@ usage(const char *p)
 	exit(2);
 }
 
+double
+elapsed_msec(struct timeval *a, struct timeval *b)
+{
+	double dt = 1000.0 * b->tv_sec - 1000.0 *  a->tv_sec;
+	dt += (double) b->tv_usec / 1000.0 - (double) a->tv_usec / 1000.0;
+	return dt;
+}
 
 int
 main(int argc, char *argv[])
@@ -524,6 +531,7 @@ main(int argc, char *argv[])
 	int calculate = 0;
 	int verify = 0;
 	int rc = 0;
+	struct timeval t0, t1, t2, t3;
 
 	progname = strrchr(argv[0], '/');
 	if (0 == progname)
@@ -569,6 +577,8 @@ main(int argc, char *argv[])
 			err(1, "%s(%d): %s", __FILE__, __LINE__, argv[1]);
 	}
 
+	gettimeofday(&t0, 0);
+
 #if ZONEMD_INCREMENTAL
 	theTree = calloc(1, sizeof(*theTree));
 	assert(theTree);
@@ -579,6 +589,7 @@ main(int argc, char *argv[])
 		const EVP_MD *md = zonemd_digester(placeholder);
 		zonemd_add_placeholder(theZone, placeholder, EVP_MD_size(md));
 	}
+	gettimeofday(&t1, 0);
 	if (calculate) {
 		uint8_t found_digest_type;
 		const EVP_MD *md = 0;
@@ -601,6 +612,7 @@ main(int argc, char *argv[])
 		if (zsk_fname)
 			zonemd_resign(zonemd_rr, zsk_fname, theZone);
 	}
+	gettimeofday(&t2, 0);
 	if (verify) {
 		uint8_t found_digest_type;
 		unsigned char found_digest_buf[512];
@@ -643,6 +655,7 @@ main(int argc, char *argv[])
 		}
 		free(md_buf);
 	}
+	gettimeofday(&t3, 0);
 	if (output_file && (placeholder || calculate)) {
 		FILE *fp = fopen(output_file, "w");
 		if (!fp)
@@ -656,6 +669,11 @@ main(int argc, char *argv[])
 	if (origin_str)
 		free(origin_str);
 	ldns_zone_deep_free(theZone);
+
+	printf("TIMINGS: load %7.2lf calculate %7.2lf verify %7.2lf\n",
+		elapsed_msec(&t0, &t1),
+		elapsed_msec(&t1, &t2),
+		elapsed_msec(&t2, &t3));
 
 	return rc;
 }
