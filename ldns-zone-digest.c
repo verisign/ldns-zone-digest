@@ -831,7 +831,7 @@ main(int argc, char *argv[])
 	if (0 == progname)
 		progname = argv[0];
 
-	while ((ch = getopt(argc, argv, "co:p:u:vz:B:D:")) != -1) {
+	while ((ch = getopt(argc, argv, "co:p:u:vz:W:D:")) != -1) {
 		switch (ch) {
 		case 'c':
 			calculate = 1;
