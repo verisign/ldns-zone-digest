@@ -66,7 +66,7 @@ void md_tree_calc_digest(md_tree *node, const EVP_MD *md, unsigned char *buf);
 
 md_tree *theTree = 0;
 unsigned int md_max_depth = 0;
-unsigned int md_max_branch = 13;
+unsigned int md_max_width = 13;
 #endif
 
 #if DEBUG
@@ -576,8 +576,8 @@ usage(const char *p)
 	fprintf(stderr, "\t-v\t\tverify the zone digest\n");
 	fprintf(stderr, "\t-z\t\tZSK file name\n");
 #if ZONEMD_INCREMENTAL
-	fprintf(stderr, "\t-B\t\tBranch width of hash tree\n");
 	fprintf(stderr, "\t-D\t\tDepth of hash tree\n");
+	fprintf(stderr, "\t-W\t\tWidth of hash tree\n");
 #endif
 	exit(2);
 }
@@ -708,11 +708,11 @@ main(int argc, char *argv[])
 			zsk_fname = strdup(optarg);
 			break;
 #if ZONEMD_INCREMENTAL
-		case 'B':
-			md_max_branch = strtoul(optarg, 0, 10);
-			break;
 		case 'D':
 			md_max_depth = strtoul(optarg, 0, 10);
+			break;
+		case 'W':
+			md_max_width = strtoul(optarg, 0, 10);
 			break;
 #endif
 		default:
@@ -793,7 +793,7 @@ md_tree_branch_by_name(unsigned int depth, const char *name)
 	if (len == 0)
 		return 0;
 	pos = depth % len;
-	branch = *(name+pos) % md_max_branch;
+	branch = *(name+pos) % md_max_width;
 	fdebugf(stderr, "%s(%d): md_tree_branch_by_name '%s' depth %u pos %u branch %u\n", __FILE__,__LINE__,name, depth, pos, branch);
 	return branch;
 }
@@ -805,7 +805,7 @@ md_tree_get_leaf_by_name(md_tree *node, const char *name)
 	if (md_max_depth > node->depth) {
 		unsigned int branch = md_tree_branch_by_name(node->depth, name);
 		if (node->kids == 0) {
-			node->kids = calloc(md_max_branch, sizeof(*node->kids));
+			node->kids = calloc(md_max_width, sizeof(*node->kids));
 			assert(node->kids);
 		}
 		if (node->kids[branch] == 0) {
@@ -882,7 +882,7 @@ md_tree_calc_digest(md_tree *node, const EVP_MD *md, unsigned char *buf)
 	if (md_max_depth > node->depth) {
 		unsigned int branch;
 		assert(node->kids);
-		for (branch = 0; branch < md_max_branch; branch++) {
+		for (branch = 0; branch < md_max_width; branch++) {
 			if (node->kids[branch] == 0)
 				continue;
 			md_tree_calc_digest(node->kids[branch], md, (unsigned char *) node->digest);
