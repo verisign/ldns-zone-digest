@@ -407,34 +407,11 @@ zonemd_add_placeholder(ldns_zone * zone, uint8_t digest_type, unsigned int diges
 
 }
 
-/*
- * zonemd_calc_digest()
- *
- * Calculate a digest over the zone.
- */
 void
-zonemd_calc_digest(ldns_zone * zone, const EVP_MD *md, unsigned char *buf)
+zonemd_rrlist_update_digest(const ldns_rr_list *rrlist, EVP_MD_CTX *ctx, unsigned char *buf)
 {
-	ldns_rr_list *rrlist = 0;
-	ldns_status status;
 	unsigned int i;
-	EVP_MD_CTX *ctx;
-
-	fprintf(stderr, "Sorting Zone...");
-	/*
-	 * thankfully ldns_zone_sort() already sorts by RRtype for same owner name
-	 */
-	ldns_zone_sort(zone);
-	rrlist = ldns_zone_rrs(zone);
-	fprintf(stderr, "%s\n", "Done");
-	assert(rrlist);
-
-	ctx = EVP_MD_CTX_create();
-	assert(ctx);
-	if (!EVP_DigestInit(ctx, md))
-		errx(1, "%s(%d): Digest init failed", __FILE__, __LINE__);
-
-	fprintf(stderr, "Calculating Digest...");
+	ldns_status status;
 	for (i = 0; i < ldns_rr_list_rr_count(rrlist); i++) {
 		uint8_t *wire_buf;
 		size_t sz;
@@ -449,6 +426,31 @@ zonemd_calc_digest(ldns_zone * zone, const EVP_MD *md, unsigned char *buf)
 			errx(1, "%s(%d): Digest update failed", __FILE__, __LINE__);
 		free(wire_buf);
 	}
+}
+
+/*
+ * zonemd_calc_digest()
+ *
+ * Calculate a digest over the zone.
+ */
+void
+zonemd_calc_digest(ldns_zone * zone, const EVP_MD *md, unsigned char *buf)
+{
+	EVP_MD_CTX *ctx;
+
+	/*
+	 * thankfully ldns_zone_sort() already sorts by RRtype for same owner name
+	 */
+	fprintf(stderr, "Sorting Zone...");
+	ldns_zone_sort(zone);
+	fprintf(stderr, "%s\n", "Done");
+
+	fprintf(stderr, "Calculating Digest...");
+	ctx = EVP_MD_CTX_create();
+	assert(ctx);
+	if (!EVP_DigestInit(ctx, md))
+		errx(1, "%s(%d): Digest init failed", __FILE__, __LINE__);
+	zonemd_rrlist_update_digest(ldns_zone_rrs(zone), ctx, buf);
 	if (!EVP_DigestFinal(ctx, buf, 0))
 		errx(1, "%s(%d): Digest final failed", __FILE__, __LINE__);
 	EVP_MD_CTX_destroy(ctx);
@@ -890,25 +892,9 @@ md_tree_calc_digest(md_tree *node, const EVP_MD *md, unsigned char *buf)
 				errx(1, "%s(%d): Digest update failed", __FILE__, __LINE__);
 		}
 	} else {
-		unsigned int i;
 		assert(node->rrlist);
 		ldns_rr_list_sort(node->rrlist);
-		for (i = 0; i < ldns_rr_list_rr_count(node->rrlist); i++) {
-			uint8_t *wire_buf;
-			size_t sz;
-			ldns_status status;
-			ldns_rr *rr = ldns_rr_list_rr(node->rrlist, i);
-			fdebugf(stderr, "%s(%d): md_tree_calc_digest RR#%u: %s", __FILE__,__LINE__, i, ldns_rr2str(rr));
-			if (ldns_rr_get_type(rr) == LDNS_RR_TYPE_RRSIG)
-				if (my_typecovered(rr) == LDNS_RR_TYPE_ZONEMD)
-					continue;
-			status = ldns_rr2wire(&wire_buf, rr, LDNS_SECTION_ANSWER, &sz);
-			if (status != LDNS_STATUS_OK)
-				errx(1, "%s(%d): ldns_rr2wire() failed", __FILE__, __LINE__);
-			if (!EVP_DigestUpdate(ctx, wire_buf, sz))
-				errx(1, "%s(%d): Digest update failed", __FILE__, __LINE__);
-			free(wire_buf);
-		}
+		zonemd_rrlist_update_digest(node->rrlist, ctx, buf);
 	}
 	if (!EVP_DigestFinal_ex(ctx, buf, 0))
 		errx(1, "%s(%d): Digest final failed", __FILE__, __LINE__);
