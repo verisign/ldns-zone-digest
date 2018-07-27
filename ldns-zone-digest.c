@@ -78,12 +78,12 @@ unsigned int md_max_width = 13;
 void zonemd_print_digest(FILE *, const char *, const unsigned char *, unsigned int, const char *);
 
 /*
- * zonemd_pack()
+ * zonemd_rr_pack()
  *
  * This function creates and returns an ldns_rr for the ZONEMD record.
  */
 ldns_rr *
-zonemd_pack(ldns_rdf * owner, uint32_t ttl, uint32_t serial, uint8_t digest_type, void *digest, size_t digest_sz)
+zonemd_rr_pack(ldns_rdf * owner, uint32_t ttl, uint32_t serial, uint8_t digest_type, void *digest, size_t digest_sz)
 {
 	char *buf;
 	buf = calloc(1, 4 + 1 + digest_sz);
@@ -103,13 +103,13 @@ zonemd_pack(ldns_rdf * owner, uint32_t ttl, uint32_t serial, uint8_t digest_type
 }
 
 /*
- * zonemd_find()
+ * zonemd_rr_find()
  *
  * This function searches through an ldns_zone and returns the first ZONEMD record found.
  * It "unpacks" the found RR into the ret_ paramaters.
  */
 ldns_rr *
-zonemd_find(ldns_zone *zone, uint32_t *ret_serial, uint8_t *ret_digest_type, void *ret_digest, size_t digest_sz)
+zonemd_rr_find(ldns_zone *zone, uint32_t *ret_serial, uint8_t *ret_digest_type, void *ret_digest, size_t digest_sz)
 {
 	ldns_rr *ret = 0;
 	ldns_rr_list *rrlist;
@@ -145,12 +145,12 @@ zonemd_find(ldns_zone *zone, uint32_t *ret_serial, uint8_t *ret_digest_type, voi
 }
 
 /*
- * zonemd_update_digest() 
+ * zonemd_rr_update_digest() 
  *
  * Updates the digest part of a placeholder ZONEMD record.
  */
 void
-zonemd_update_digest(ldns_rr * rr, uint8_t digest_type, unsigned char *digest_buf, unsigned int digest_len)
+zonemd_rr_update_digest(ldns_rr * rr, uint8_t digest_type, unsigned char *digest_buf, unsigned int digest_len)
 {
 	uint8_t rr_digest_type = 0;
 	ldns_rdf *rdf = 0;
@@ -162,14 +162,14 @@ zonemd_update_digest(ldns_rr * rr, uint8_t digest_type, unsigned char *digest_bu
 	assert(buf);
 
 	if (ldns_rdf_size(rdf) != 4 + 1 + digest_len)
-		errx(1, "%s(%d): zonemd_update_digest expected rdata size %u but got %zu\n",
+		errx(1, "%s(%d): zonemd_rr_update_digest expected rdata size %u but got %zu\n",
 			__FILE__, __LINE__,
 			4 + 1 + digest_len,
 			ldns_rdf_size(rdf));
 
 	memcpy(&rr_digest_type, &buf[4], 1);
 	if (rr_digest_type != digest_type)
-		errx(1, "%s(%d): zonemd_update_digest mismatched digest type.  Found %u but wanted %u.", __FILE__, __LINE__, rr_digest_type, digest_type);
+		errx(1, "%s(%d): zonemd_rr_update_digest mismatched digest type.  Found %u but wanted %u.", __FILE__, __LINE__, rr_digest_type, digest_type);
 
 	if (digest_buf)
 		memcpy(&buf[5], digest_buf, digest_len);
@@ -396,7 +396,7 @@ zonemd_add_placeholder(ldns_zone * zone, uint8_t digest_type, unsigned int diges
 
 	digest_buf = calloc(1, digest_len);
 	assert(digest_buf);
-	zonemd = zonemd_pack(ldns_rr_owner(soa), ldns_rr_ttl(soa), soa_serial, digest_type, digest_buf, digest_len);
+	zonemd = zonemd_rr_pack(ldns_rr_owner(soa), ldns_rr_ttl(soa), soa_serial, digest_type, digest_buf, digest_len);
 	free(digest_buf);
 
 	fprintf(stderr, "Add placeholder ZONEMD...\n");
@@ -597,7 +597,7 @@ do_calculate(ldns_zone *zone, const char *zsk_fname)
 	const EVP_MD *md = 0;
 	unsigned char *md_buf = 0;
 	unsigned int md_len = 0;
-	ldns_rr *zonemd_rr = zonemd_find(zone, 0, &found_digest_type, 0, 0);
+	ldns_rr *zonemd_rr = zonemd_rr_find(zone, 0, &found_digest_type, 0, 0);
 	if (!zonemd_rr)
 		errx(1, "%s(%d): No %s record found in zone.  Use -p to add one.", __FILE__, __LINE__, RRNAME);
 	md = zonemd_digester(found_digest_type);
@@ -610,7 +610,7 @@ do_calculate(ldns_zone *zone, const char *zsk_fname)
 	assert(md_buf);
 	zonemd_calc_digest(zone, md, md_buf);
 #endif
-	zonemd_update_digest(zonemd_rr, found_digest_type, md_buf, md_len);
+	zonemd_rr_update_digest(zonemd_rr, found_digest_type, md_buf, md_len);
 	if (zsk_fname)
 		zonemd_resign(zonemd_rr, zsk_fname, zone);
 }
@@ -628,7 +628,7 @@ do_verify(ldns_zone *zone)
 	const EVP_MD *md = 0;
 	unsigned char *md_buf = 0;
 	unsigned int md_len = 0;
-	ldns_rr *zonemd_rr = zonemd_find(zone, &found_serial, &found_digest_type, found_digest_buf, sizeof(found_digest_buf));
+	ldns_rr *zonemd_rr = zonemd_rr_find(zone, &found_serial, &found_digest_type, found_digest_buf, sizeof(found_digest_buf));
 	if (!zonemd_rr)
 		errx(1, "%s(%d): No %s record found in zone, cannot verify.", __FILE__, __LINE__, RRNAME);
 	soa = ldns_zone_soa(zone);
@@ -643,7 +643,7 @@ do_verify(ldns_zone *zone)
 	md = zonemd_digester(found_digest_type);
 	assert(EVP_MD_size(md) <= sizeof(found_digest_buf));
 	md_len = EVP_MD_size(md);
-	zonemd_update_digest(zonemd_rr, found_digest_type, 0, md_len);	/* zero digest part */
+	zonemd_rr_update_digest(zonemd_rr, found_digest_type, 0, md_len);	/* zero digest part */
 #if ZONEMD_INCREMENTAL
 	md_buf = theTree->digest;
 	md_tree_calc_digest(theTree, md, md_buf);
