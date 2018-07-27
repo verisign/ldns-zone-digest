@@ -801,6 +801,7 @@ md_tree_branch_by_name(unsigned int depth, const char *name)
 md_tree *
 md_tree_get_leaf_by_name(md_tree *node, const char *name)
 {
+	node->dirty = true;
 	if (md_max_depth > node->depth) {
 		unsigned int branch = md_tree_branch_by_name(node->depth, name);
 		if (node->kids == 0) {
@@ -817,7 +818,6 @@ md_tree_get_leaf_by_name(md_tree *node, const char *name)
 		return md_tree_get_leaf_by_name(node->kids[branch], name);
 	}
 	fdebugf(stderr, "%s(%d): md_tree_get_leaf depth %u branch %u\n", __FILE__,__LINE__,node->depth, node->branch);
-	node->dirty = true;
 	return node;
 }
 
