@@ -835,6 +835,7 @@ main(int argc, char *argv[])
 	int placeholder = 0;
 	int calculate = 0;
 	int verify = 0;
+	int print_timings = 0;
 	int rc = 0;
 	struct timeval t0, t1, t2, t3, t4;
 
@@ -842,7 +843,7 @@ main(int argc, char *argv[])
 	if (0 == progname)
 		progname = argv[0];
 
-	while ((ch = getopt(argc, argv, "co:p:u:vz:W:D:")) != -1) {
+	while ((ch = getopt(argc, argv, "co:p:tu:vz:W:D:")) != -1) {
 		switch (ch) {
 		case 'c':
 			calculate = 1;
@@ -852,6 +853,9 @@ main(int argc, char *argv[])
 			break;
 		case 'p':
 			placeholder = strtoul(optarg, 0, 10);
+			break;
+		case 't':
+			print_timings = 1;
 			break;
 		case 'u':
 			update_file = strdup(optarg);
@@ -931,11 +935,12 @@ main(int argc, char *argv[])
 	if (update_file)
 		free(update_file);
 
-	printf("TIMINGS: load %7.2lf calculate %7.2lf verify %7.2lf update %7.2lf\n",
-		elapsed_msec(&t0, &t1),
-		elapsed_msec(&t1, &t2),
-		elapsed_msec(&t2, &t3),
-		elapsed_msec(&t3, &t4));
+	if (print_timings)
+		printf("TIMINGS: load %7.2lf calculate %7.2lf verify %7.2lf update %7.2lf\n",
+			elapsed_msec(&t0, &t1),
+			elapsed_msec(&t1, &t2),
+			elapsed_msec(&t2, &t3),
+			elapsed_msec(&t3, &t4));
 
 	return rc;
 }
