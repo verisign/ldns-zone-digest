@@ -764,6 +764,7 @@ do_calculate(const char *zsk_fname)
 		errx(1, "%s(%d): No %s record found in zone.  Use -p to add one.", __FILE__, __LINE__, RRNAME);
 	md = zonemd_digester(found_digest_type);
 	md_len = EVP_MD_size(md);
+	zonemd_rr_update_digest(zonemd_rr, found_digest_type, 0, md_len);	/* zero digest part */
 #if !ZONEMD_INCREMENTAL
 	md_buf = calloc(1, md_len);
 	assert(md_buf);
