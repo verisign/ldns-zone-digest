@@ -43,6 +43,8 @@
 #include <assert.h>
 #include <getopt.h>
 #include <openssl/evp.h>
+#include <sys/time.h>
+#include <sys/resource.h>
 
 const ldns_rr_type LDNS_RR_TYPE_ZONEMD = 65317;
 const char *RRNAME = "ZONEMD";
@@ -583,6 +585,15 @@ usage(const char *p)
 	exit(2);
 }
 
+void
+my_getrusage(struct timeval *ret)
+{
+	struct rusage ru;
+	memset(&ru, 0, sizeof(ru));
+	getrusage(RUSAGE_SELF, &ru);
+	timeradd(&ru.ru_utime, &ru.ru_stime, ret);
+}
+
 double
 elapsed_msec(struct timeval *a, struct timeval *b)
 {
@@ -874,7 +885,7 @@ main(int argc, char *argv[])
 			err(1, "%s(%d): %s", __FILE__, __LINE__, argv[1]);
 	}
 
-	gettimeofday(&t0, 0);
+	my_getrusage(&t0);
 
 
 
@@ -890,19 +901,19 @@ main(int argc, char *argv[])
 		const EVP_MD *md = zonemd_digester(placeholder);
 		zonemd_add_placeholder(placeholder, EVP_MD_size(md));
 	}
-	gettimeofday(&t1, 0);
+	my_getrusage(&t1);
 	if (calculate)
 		do_calculate(zsk_fname);
-	gettimeofday(&t2, 0);
+	my_getrusage(&t2);
 	if (verify)
 		rc |= do_verify();
-	gettimeofday(&t3, 0);
+	my_getrusage(&t3);
 	if (update_file) {
 		zonemd_zone_update(update_file);
 		if (calculate)
 			do_calculate(zsk_fname);
 	}
-	gettimeofday(&t4, 0);
+	my_getrusage(&t4);
 	if (output_file && (placeholder || calculate)) {
 		FILE *fp = fopen(output_file, "w");
 		if (!fp)
