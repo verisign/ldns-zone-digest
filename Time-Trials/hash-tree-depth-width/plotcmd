@@ -1,8 +1,13 @@
-set title 'Time to load zone and calculate hash'
-set xlabel 'Hash Tree Depth'
-set ylabel 'Hash Tree Width'
+set term png
+set title sprintf('Relative ZONEMD Calculation Time -- %s', ZONE)
+set xlabel 'Hash Tree Depth' rotate parallel offset -2,0,0
+set ylabel 'Hash Tree Width' rotate parallel offset 0,-1,0
 set grid
 set view 60,60
 set hidden3d
+set zrange [0:1.1]
+set contour base
+#set cntrparam levels incremental 0.6, 0.05, 1.0
+set xyplane 0
 
-splot 'measure.dat' using 1:2:3 with lines t ''
+splot '/dev/fd/0' using 1:2:3 with lines t ''
