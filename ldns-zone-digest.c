@@ -410,6 +410,11 @@ zonemd_rrlist_digest(ldns_rr_list *rrlist, EVP_MD_CTX *ctx, unsigned char *buf)
 		if (ldns_rr_get_type(rr) == LDNS_RR_TYPE_RRSIG)
 			if (my_typecovered(rr) == LDNS_RR_TYPE_ZONEMD)
 				continue;
+#if DEBUG
+		char *s = ldns_rr2str(rr);
+		fdebugf(stderr, "%s(%d): zonemd_rrlist_digest RR#%u: %s\n", __FILE__, __LINE__, i, s);
+		free(s);
+#endif
 		status = ldns_rr2wire(&wire_buf, rr, LDNS_SECTION_ANSWER, &sz);
 		if (status != LDNS_STATUS_OK)
 			errx(1, "%s(%d): ldns_rr2wire() failed", __FILE__, __LINE__);
