@@ -3,10 +3,22 @@ ZONE=earth
 PWD=$(shell pwd)
 NAME=$(shell basename ${PWD})
 
+all: \
+ ${ZONE}/${NAME}-${ZONE}.png \
+ ${ZONE}/${NAME}-${ZONE}-2d.png
+
 ${ZONE}/${NAME}-${ZONE}.png: ${ZONE}/${NAME}-${ZONE}.dat plotcmd
-	cat ${ZONE}/${NAME}-${ZONE}.dat \
+	cat -s ${ZONE}/${NAME}-${ZONE}.dat \
 	| perl normalize-dat.pl \
 	| gnuplot -e "ZONE='${ZONE}'" plotcmd > $@_
+	mv $@_ $@
+
+${ZONE}/${NAME}-${ZONE}-2d.png: ${ZONE}/${NAME}-${ZONE}.dat plotcmd2d
+	gnuplot \
+		-e "ZONE='${ZONE}'" \
+		-e "DATAFILE='${ZONE}/${NAME}-${ZONE}.dat'" \
+		plotcmd2d \
+		> $@_
 	mv $@_ $@
 
 ${ZONE}/${NAME}-${ZONE}.dat:
