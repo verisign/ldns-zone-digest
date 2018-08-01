@@ -1,0 +1,12 @@
+set term png
+set title sprintf('ZONEMD Update Time -- %s', ZONE)
+set xlabel 'Hash Tree Depth' rotate parallel offset -2,0,0
+set ylabel 'Hash Tree Width' rotate parallel offset 0,-1,0
+set grid
+set view 60,120
+set hidden3d
+set contour base
+#et logscale z
+#et xyplane 0
+
+splot '/dev/fd/0' using 1:2:3 with lines t ''
