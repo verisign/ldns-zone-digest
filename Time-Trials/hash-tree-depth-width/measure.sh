@@ -33,4 +33,5 @@ for D in `seq 0 9` ; do
 	printf "%d %d %5.2f\n" $D $B $BEST
     done
     echo ""
+    echo ""
 done
