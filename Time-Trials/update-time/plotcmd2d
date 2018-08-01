@@ -1,9 +1,10 @@
 set term png
 set title sprintf('ZONEMD Update Calculation Time -- %s', ZONE)
 set xlabel 'Hash Tree Width'
-set ylabel 'Calculation Time, msec'
+set ylabel 'Update Time, msec'
 set grid
-set yrange [0:]
+#set yrange [0:]
+set logscale y
 set key bottom right
 
 set style data lines
