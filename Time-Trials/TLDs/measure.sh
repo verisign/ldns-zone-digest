@@ -32,19 +32,27 @@ for ZF in /zfa/Zones/*/2018/*-${YYYYMMDD}.gz ; do
 	NRSET=`cat $UDIR/$ZN | awk '{print $1,$4}' | sort | uniq -i | wc -l`
 	rm -f /tmp/cpu
 	if test "$MODE" = "-c" ; then
-		/usr/bin/time --format '%U %S' --output /tmp/cpu \
-		../ldns-zone-digest -p $ALG -c $ZN \
-		< $UDIR/$ZN \
-		> $DDIR/$ZN \
-		2>/dev/null
+		../../ldns-zone-digest \
+			-t \
+			-p $ALG \
+			-c \
+			-o $DDIR/$ZN \
+			$ZN \
+			$UDIR/$ZN \
+		> /tmp/timing.$$
+		T=`awk '/^TIMINGS:/ {print $5}' /tmp/timing.$$`
 	elif test "$MODE" = "-v" ; then
-		/usr/bin/time --format '%U %S' --output /tmp/cpu \
-		../ldns-zone-digest -v $ZN \
-		< $DDIR/$ZN
+		../../ldns-zone-digest \
+			-v \
+			$ZN \
+			$DDIR/$ZN \
+		> /tmp/timing.$$
+		T=`awk '/^TIMINGS:/ {print $7}' /tmp/timing.$$`
 	fi
-	CPU=`cat /tmp/cpu`
-	echo "$ZN $NR $NRSET $CPU" >> ${LOG}_
+	printf "%s %d %d %5.2f\n" $ZN $NR $NRSET $T >> ${LOG}_
 done
 
 sort -n -k 2 < ${LOG}_ > ${LOG}
 rm -f ${LOG}_
+
+rm -v /tmp/timing.$$
