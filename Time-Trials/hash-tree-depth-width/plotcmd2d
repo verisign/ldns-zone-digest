@@ -1,13 +1,13 @@
-set term png
+set term png size 720,480
 set title sprintf('ZONEMD Calculation Time -- %s', ZONE)
 set xlabel 'Hash Tree Width'
-set ylabel 'Calculation Time, msec'
+set ylabel 'Calculation Time, seconds'
 set grid
 set yrange [0:]
 set key bottom right
 
 set style data lines
-plot DATAFILE using 2:3 index 0 t 'Depth 0' \
-   , DATAFILE using 2:3 index 1 t 'Depth 1' \
-   , DATAFILE using 2:3 index 5 t 'Depth 5' \
-   , DATAFILE using 2:3 index 9 t 'Depth 9' \
+plot DATAFILE using 2:($3/1000) index 0 t 'Depth 0' \
+   , DATAFILE using 2:($3/1000) index 1 t 'Depth 1' \
+   , DATAFILE using 2:($3/1000) index 5 t 'Depth 5' \
+   , DATAFILE using 2:($3/1000) index 9 t 'Depth 9' \
