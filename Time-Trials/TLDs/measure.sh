@@ -30,9 +30,9 @@ for ZF in /zfa/Zones/*/2018/*-${YYYYMMDD}.gz ; do
 	fi
 	NR=`wc -l < $UDIR/$ZN`
 	NRSET=`cat $UDIR/$ZN | awk '{print $1,$4}' | sort | uniq -i | wc -l`
-	rm -f /tmp/cpu
 	if test "$MODE" = "-c" ; then
-		../../ldns-zone-digest \
+		sort --random-sort $UDIR/$ZN \
+		| ../../ldns-zone-digest \
 			-t \
 			-p $ALG \
 			-c \
@@ -42,10 +42,11 @@ for ZF in /zfa/Zones/*/2018/*-${YYYYMMDD}.gz ; do
 		> /tmp/timing.$$
 		T=`awk '/^TIMINGS:/ {print $5}' /tmp/timing.$$`
 	elif test "$MODE" = "-v" ; then
-		../../ldns-zone-digest \
+		sort --random-sort $DDIR/$ZN \
+		| ../../ldns-zone-digest \
+			-t \
 			-v \
 			$ZN \
-			$DDIR/$ZN \
 		> /tmp/timing.$$
 		T=`awk '/^TIMINGS:/ {print $7}' /tmp/timing.$$`
 	fi
