@@ -1,6 +1,8 @@
 set term png size 900,600
 set style data linespoints
 
+set xrange [15:50000000]
+
 set logscale x
 set logscale y
 
@@ -32,5 +34,5 @@ set label "root" left at 22493, 0.17+0.00 front offset 0.5,0
 
 set grid y
 set style data linespoints
-plot 'validate-alg2.log' using ($2):($4/1000) t 'SHA256' \
+plot 'validate-alg2.log' using ($2):($4/1000) t 'SHA256' lc 2 \
 
