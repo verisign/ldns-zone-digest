@@ -69,6 +69,9 @@ typedef struct _zonemd_tree {
 zonemd_tree *theTree = 0;
 unsigned int zonemd_tree_max_depth = 0;
 unsigned int zonemd_tree_max_width = 13;
+#if ZONEMD_SAVE_LEAF_COUNTS
+FILE *save_leaf_counts = 0;
+#endif
 #endif
 
 #if DEBUG
@@ -197,6 +200,11 @@ zonemd_tree_full_rrlist(zonemd_tree *node, ldns_rr_list *rrlist)
 		return;
 	}
 	ldns_rr_list_push_rr_list(rrlist, node->rrlist);
+#if ZONEMD_SAVE_LEAF_COUNTS
+	if (save_leaf_counts) {
+		fprintf(save_leaf_counts, "%zd\n", ldns_rr_list_rr_count(node->rrlist));
+	}
+#endif
 }
 
 #endif
@@ -904,6 +912,9 @@ main(int argc, char *argv[])
 #else
 	theTree = calloc(1, sizeof(*theTree));
 	assert(theTree);
+#if ZONEMD_SAVE_LEAF_COUNTS
+	save_leaf_counts = fopen("leaf-counts.dat", "w");
+#endif
 #endif
 	zonemd_read_zone(origin_str, input, 0, LDNS_RR_CLASS_IN);
 
