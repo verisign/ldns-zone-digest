@@ -5,7 +5,7 @@ all: root.zone.hashed
 	${ZONEHASH} -v . root.zone.hashed 
 
 root.zone.hashed: root.zone.signed
-	${ZONEHASH} -c -z Keys/K.+008+17913.private . root.zone.signed > $@_
+	${ZONEHASH} -c -z Keys/K.+008+17913.private -o $@_ . root.zone.signed
 	${READZONE} $@_ > $@
 	rm -fv $@_
 
