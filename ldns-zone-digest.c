@@ -46,6 +46,7 @@
 #include <sys/time.h>
 #include <sys/resource.h>
 
+int quiet = 0;
 const ldns_rr_type LDNS_RR_TYPE_ZONEMD = 65317;
 const char *RRNAME = "ZONEMD";
 static ldns_rdf *origin = 0;
@@ -442,7 +443,8 @@ zonemd_calc_digest(void *arg, const EVP_MD *md, unsigned char *buf)
 {
 	EVP_MD_CTX *ctx;
 #if !ZONEMD_INCREMENTAL
-	fprintf(stderr, "Calculating Digest...");
+	if (!quiet)
+		fprintf(stderr, "Calculating Digest...");
 #else
 	zonemd_tree *node = arg;
 	fdebugf(stderr, "%s(%d): zonemd_calc_digest depth %u branch %u\n", __FILE__, __LINE__, node->depth, node->branch);
@@ -476,7 +478,8 @@ zonemd_calc_digest(void *arg, const EVP_MD *md, unsigned char *buf)
 		errx(1, "%s(%d): Digest final failed", __FILE__, __LINE__);
 	EVP_MD_CTX_destroy(ctx);
 #if !ZONEMD_INCREMENTAL
-	fprintf(stderr, "%s\n", "Done");
+	if (!quiet)
+		fprintf(stderr, "%s\n", "Done");
 #else
 	node->dirty = false;
 #endif
@@ -595,6 +598,7 @@ usage(const char *p)
 	fprintf(stderr, "\t-D\t\tDepth of hash tree\n");
 	fprintf(stderr, "\t-W\t\tWidth of hash tree\n");
 #endif
+	fprintf(stderr, "\t-q\t\tquiet mode, show errors only\n");
 	exit(2);
 }
 
@@ -629,7 +633,8 @@ zonemd_add_placeholder(uint8_t digest_type, unsigned int digest_len)
 	uint32_t soa_serial;
 	ldns_rr *zonemd = 0;
 
-	fprintf(stderr, "Remove existing ZONEMD...\n");
+	if (!quiet)
+		fprintf(stderr, "Remove existing ZONEMD...\n");
 	zonemd_remove_rr(LDNS_RR_TYPE_ZONEMD, 0);
 
 	soa_serial_rdf = ldns_rr_rdf(the_soa, 2);
@@ -640,7 +645,8 @@ zonemd_add_placeholder(uint8_t digest_type, unsigned int digest_len)
 	zonemd = zonemd_rr_pack(ldns_rr_owner(the_soa), ldns_rr_ttl(the_soa), soa_serial, digest_type, digest_buf, digest_len);
 	free(digest_buf);
 
-	fprintf(stderr, "Add placeholder ZONEMD...\n");
+	if (!quiet)
+		fprintf(stderr, "Add placeholder ZONEMD...\n");
 	zonemd_add_rr(zonemd);
 }
 
@@ -660,7 +666,8 @@ zonemd_read_zone(const char *origin_str, FILE * fp, uint32_t ttl, ldns_rr_class 
 	unsigned int i;
 	unsigned int count = 0;
 
-	fprintf(stderr, "Loading Zone...");
+	if (!quiet)
+		fprintf(stderr, "Loading Zone...");
 	origin = ldns_rdf_new_frm_str(LDNS_RDF_TYPE_DNAME, origin_str);
 	assert(origin);
 	status = ldns_zone_new_frm_fp(&zone, fp, origin, ttl, class);
@@ -696,7 +703,8 @@ zonemd_read_zone(const char *origin_str, FILE * fp, uint32_t ttl, ldns_rr_class 
 		count++;
 	}
 
-	fprintf(stderr, "%u records\n", count);
+	if (!quiet)
+		fprintf(stderr, "%u records\n", count);
 	ldns_rr_list_deep_free(tbflist);
 	ldns_rr_list_free(oldlist);
 	ldns_zone_set_rrs(zone, 0);
@@ -727,7 +735,8 @@ zonemd_zone_update(const char *update_file)
 	if (!fp)
 		err(1, "%s(%d): %s", __FILE__, __LINE__, update_file);
 
-	fprintf(stderr, "Updating Zone...");
+	if (!quiet)
+		fprintf(stderr, "Updating Zone...");
 	while (fgets(file_buf, sizeof(file_buf), fp)) {
 		line++;
 		char *cmd = 0;
@@ -757,7 +766,8 @@ zonemd_zone_update(const char *update_file)
 		}
 	}
 	fclose(fp);
-	fprintf(stderr, "%u additions, %u deletions\n", n_add, n_del);
+	if (!quiet)
+		fprintf(stderr, "%u additions, %u deletions\n", n_add, n_del);
 }
 
 void
@@ -828,7 +838,8 @@ do_verify()
 		zonemd_print_digest(stderr, "Calculated: ", md_buf, md_len, "\n");
 		rc |= 1;
 	} else {
-		fprintf(stderr, "Found and calculated digests do MATCH.\n");
+		if (!quiet)
+			fprintf(stderr, "Found and calculated digests do MATCH.\n");
 	}
 #if !ZONEMD_INCREMENTAL
 	free(md_buf);
@@ -857,7 +868,7 @@ main(int argc, char *argv[])
 	if (0 == progname)
 		progname = argv[0];
 
-	while ((ch = getopt(argc, argv, "co:p:tu:vz:W:D:")) != -1) {
+	while ((ch = getopt(argc, argv, "co:p:tu:vz:W:D:q")) != -1) {
 		switch (ch) {
 		case 'c':
 			calculate = 1;
@@ -888,6 +899,9 @@ main(int argc, char *argv[])
 			zonemd_tree_max_width = strtoul(optarg, 0, 10);
 			break;
 #endif
+		case 'q':
+			quiet = 1;
+			break;
 		default:
 			usage(progname);
 		}
