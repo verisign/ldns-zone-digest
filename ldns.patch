@@ -1,0 +1,39 @@
+diff --git a/ldns/rr.h b/ldns/rr.h
+index 59c7ce6..cb21fda 100644
+--- a/ldns/rr.h
++++ b/ldns/rr.h
+@@ -221,6 +221,7 @@ enum ldns_enum_rr_type
+ 	LDNS_RR_TYPE_CAA = 257, /* RFC 6844 */
+ 	LDNS_RR_TYPE_AVC = 258, /* Cisco's DNS-AS RR, see www.dns-as.org */
+ 	LDNS_RR_TYPE_DOA = 259, /* draft-durand-doa-over-dns */
++	LDNS_RR_TYPE_ZONEMD = 65317, /* draft-dns-zone-digest */
+ 
+ 	/** DNSSEC Trust Authorities */
+ 	LDNS_RR_TYPE_TA = 32768,
+diff --git a/rr.c b/rr.c
+index 7d74fea..f8ecdc1 100644
+--- a/rr.c
++++ b/rr.c
+@@ -2047,6 +2047,12 @@ static const ldns_rdf_type type_doa_wireformat[] = {
+ 	LDNS_RDF_TYPE_B64
+ };
+ #endif
++static const ldns_rdf_type type_zonemd_wireformat[] = {
++	LDNS_RDF_TYPE_INT32,
++	LDNS_RDF_TYPE_INT8,
++	LDNS_RDF_TYPE_INT8,
++	LDNS_RDF_TYPE_HEX
++};
+ 
+ /** \endcond */
+ 
+@@ -2443,6 +2449,9 @@ static ldns_rr_descriptor rdata_field_descriptors[] = {
+ {LDNS_RR_TYPE_NULL, "TYPE259", 1, 1, type_0_wireformat, LDNS_RDF_TYPE_NONE, LDNS_RR_NO_COMPRESS, 0 },
+ #endif
+ 
++	/* 65317 */
++	{LDNS_RR_TYPE_ZONEMD, "ZONEMD", 4, 4, type_zonemd_wireformat, LDNS_RDF_TYPE_NONE, LDNS_RR_NO_COMPRESS, 0 },
++
+ /* split in array, no longer contiguous */
+ 
+ #ifdef RRTYPE_TA
