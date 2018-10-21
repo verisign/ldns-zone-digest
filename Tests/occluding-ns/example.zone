@@ -1,7 +1,7 @@
 example.	86400	IN	A	127.0.0.1
 example.	86400	IN	NS	ns.example.
 example.	86400	IN	SOA	ns.example. admin.example. 2018031900 1800 900 604800 86400
-example.	86400	IN	TYPE65317	\# 37 7848b91c02685450f208d12a544d18171b1e9bf149eab0972f04db0b89b00806773830a10d
+example.	86400	IN	TYPE65317	\# 38 7848b91c02007255f0fe5850b1cf508f8a0522feca8e1ad56dffb1a2422458823f231e18c621
 d.example.	3600	IN	NS	d.example.com.
 a.d.example.	3600	IN	A	127.0.0.1
 ns.example.	86400	IN	A	127.0.0.1
