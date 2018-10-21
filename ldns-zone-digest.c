@@ -292,6 +292,8 @@ zonemd_rr_find(void)
 		rr = ldns_rr_list_rr(rrlist, i);
 		if (ldns_rr_get_type(rr) != ZONEMD_RR_TYPE)
 			continue;
+		if (ldns_dname_compare(ldns_rr_owner(rr), origin) != 0)
+			continue;
 		ret = rr;
 		break;
 	}
@@ -397,7 +399,7 @@ zonemd_add_rr(ldns_rr *rr)
 /*
  * zonemd_remove_rr()
  *
- * Remove RRs of type 'type' from the zone.  If 'type' is RRISG then
+ * Remove RRs of type 'type' from the zone apex.  If 'type' is RRISG then
  * signatures of type 'covered' are removed.
  */
 void
@@ -422,7 +424,9 @@ zonemd_remove_rr(ldns_rr_type type, ldns_rr_type covered)
 
 	for (i = 0; i < ldns_rr_list_rr_count(*oldp); i++) {
 		ldns_rr *rr = ldns_rr_list_rr(*oldp, i);
-		if (ldns_rr_get_type(rr) != type) {
+		if (ldns_dname_compare(ldns_rr_owner(rr), origin) != 0) {
+			ldns_rr_list_push_rr(new, rr);
+		} else if (ldns_rr_get_type(rr) != type) {
 			ldns_rr_list_push_rr(new, rr);
 		} else if (type == LDNS_RR_TYPE_RRSIG && my_typecovered(rr) != covered) {
 			ldns_rr_list_push_rr(new, rr);
@@ -818,7 +822,7 @@ do_calculate(const char *zsk_fname)
 	unsigned int md_len = 0;
 	ldns_rr *zonemd_rr = zonemd_rr_find();
 	if (!zonemd_rr)
-		errx(1, "%s(%d): No %s record found in zone.  Use -p to add one.", __FILE__, __LINE__, RRNAME);
+		errx(1, "%s(%d): No %s record found at zone apex.  Use -p to add one.", __FILE__, __LINE__, RRNAME);
 	zonemd_rr_unpack(zonemd_rr, 0, &found_digest_type, 0, 0);
 	md = zonemd_digester(found_digest_type);
 	md_len = EVP_MD_size(md);
@@ -853,7 +857,7 @@ do_verify()
 	unsigned int md_len = 0;
 	ldns_rr *zonemd_rr = zonemd_rr_find();
 	if (!zonemd_rr)
-		errx(1, "%s(%d): No %s record found in zone, cannot verify.", __FILE__, __LINE__, RRNAME);
+		errx(1, "%s(%d): No %s record found at zone apex, cannot verify.", __FILE__, __LINE__, RRNAME);
 	zonemd_rr_unpack(zonemd_rr, &found_serial, &found_digest_type, found_digest_buf, sizeof(found_digest_buf));
 	soa_serial_rdf = ldns_rr_rdf(the_soa, 2);
 	soa_serial = ldns_rdf2native_int32(soa_serial_rdf);
