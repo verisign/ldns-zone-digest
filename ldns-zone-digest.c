@@ -317,18 +317,6 @@ zonemd_rr_update_digest(ldns_rr * rr, uint8_t digest_type, unsigned char *digest
 }
 
 /*
- * zonemd_rr_print()
- *
- * Convenience function to print a ZONEMD record.  Currently it prints in the
- * RFC3597 generic RR format.
- */
-void
-zonemd_rr_print(FILE * fp, ldns_rr * rr)
-{
-	ldns_rr_print(fp, rr);
-}
-
-/*
  * my_typecovered()
  *
  * Convenience function to return the typecovered attribute of an RRSIG.
