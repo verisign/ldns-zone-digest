@@ -47,7 +47,9 @@
 #include <sys/resource.h>
 
 int quiet = 0;
-const ldns_rr_type LDNS_RR_TYPE_ZONEMD = 65317;
+
+static ldns_rr_type ZONEMD_RR_TYPE = 65317;
+static int ldns_knows_about_zonemd = 0;
 const char *RRNAME = "ZONEMD";
 static ldns_rdf *origin = 0;
 ldns_rr *the_soa = 0;
@@ -211,62 +213,126 @@ zonemd_tree_full_rrlist(zonemd_tree *node, ldns_rr_list *rrlist)
 #endif
 
 /*
- * zonemd_rr_pack()
+ * zonemd_rr_create()
  *
- * This function creates and returns an ldns_rr for the ZONEMD record.
+ * This function creates and returns an empty ZONEMD record.
  */
 ldns_rr *
-zonemd_rr_pack(ldns_rdf * owner, uint32_t ttl, uint32_t serial, uint8_t digest_type, void *digest, size_t digest_sz)
+zonemd_rr_create(ldns_rdf * owner, uint32_t ttl)
 {
-	char *buf;
-	buf = calloc(1, 4 + 1 + digest_sz);
-	ldns_write_uint32(&buf[0], serial);
-	memcpy(&buf[4], &digest_type, 1);
-	memcpy(&buf[5], digest, digest_sz);
-	ldns_rdf *rdf = ldns_rdf_new_frm_data(LDNS_RDF_TYPE_UNKNOWN, 4 + 1 + digest_sz, buf);
 	ldns_rr *rr = ldns_rr_new();
-	assert(rdf);
 	assert(rr);
 	ldns_rr_set_owner(rr, ldns_rdf_clone(owner));
 	ldns_rr_set_ttl(rr, ttl);
-	ldns_rr_set_type(rr, LDNS_RR_TYPE_ZONEMD);
-	ldns_rr_push_rdf(rr, rdf);
-	free(buf);
+	ldns_rr_set_type(rr, ZONEMD_RR_TYPE);
 	return rr;
+}
+
+/*
+ * zonemd_rr_pack()
+ *
+ * This function packs ZONEMD rdata into an existing RR.
+ */
+void
+zonemd_rr_pack(ldns_rr *rr, uint32_t serial, uint8_t digest_type, void *digest, size_t digest_sz)
+{
+	while (ldns_rr_rd_count(rr) > 0)
+	    ldns_rr_pop_rdf (rr);
+	if (ldns_knows_about_zonemd) {
+		char *tbuf = 0;
+		if (digest == 0)
+			digest = tbuf = calloc(1, digest_sz);
+		ldns_rdf *rdf_serial = ldns_native2rdf_int32(LDNS_RDF_TYPE_INT32, serial);
+		ldns_rdf *rdf_digtype = ldns_native2rdf_int8(LDNS_RDF_TYPE_INT8, digest_type);
+		ldns_rdf *rdf_reserved = ldns_native2rdf_int8(LDNS_RDF_TYPE_INT8, 0);	/* reserved */
+		ldns_rdf *rdf_digest = ldns_rdf_new_frm_data(LDNS_RDF_TYPE_HEX, digest_sz, digest);
+		assert(rdf_serial);
+		assert(rdf_digtype);
+		assert(rdf_reserved);
+		assert(rdf_digest);
+		ldns_rr_push_rdf(rr, rdf_serial);
+		ldns_rr_push_rdf(rr, rdf_digtype);
+		ldns_rr_push_rdf(rr, rdf_reserved);
+		ldns_rr_push_rdf(rr, rdf_digest);
+		if (tbuf)
+			free(tbuf);
+	} else {
+		char *buf;
+		buf = calloc(1, 4 + 1 + 1 + digest_sz);
+		ldns_write_uint32(&buf[0], serial);
+		memcpy(&buf[4], &digest_type, 1);
+		if (digest && digest_sz)
+			memcpy(&buf[6], digest, digest_sz);
+			ldns_rdf *rdf = ldns_rdf_new_frm_data(LDNS_RDF_TYPE_UNKNOWN, 4 + 1 + 1 + digest_sz, buf);
+		assert(rdf);
+		ldns_rr_push_rdf(rr, rdf);
+		free(buf);
+	}
 }
 
 /*
  * zonemd_rr_find()
  *
  * This function searches through the zone data and returns the first ZONEMD record found.
- * It "unpacks" the found RR into the ret_ paramaters.
  */
 ldns_rr *
-zonemd_rr_find(uint32_t *ret_serial, uint8_t *ret_digest_type, void *ret_digest, size_t digest_sz)
+zonemd_rr_find(void)
 {
 	ldns_rr *ret = 0;
 	ldns_rr_list *rrlist;
 	unsigned int i;
-
 #if !ZONEMD_INCREMENTAL
 	rrlist = the_rrlist;
 #else
 	zonemd_tree *node = zonemd_tree_get_leaf_by_owner(theTree, origin);
 	rrlist = node->rrlist;
 #endif
-
 	for (i = 0; i < ldns_rr_list_rr_count(rrlist); i++) {
 		ldns_rr *rr = 0;
-		ldns_rdf *rdf;
+		rr = ldns_rr_list_rr(rrlist, i);
+		if (ldns_rr_get_type(rr) != ZONEMD_RR_TYPE)
+			continue;
+		ret = rr;
+		break;
+	}
+	return ret;
+}
+
+/*
+ * zonemd_rr_unpack()
+ *
+ * This function unpacks ZONEMD fields into the ret_ paramaters.
+ */
+void
+zonemd_rr_unpack(ldns_rr *rr, uint32_t *ret_serial, uint8_t *ret_digest_type, void *ret_digest, size_t digest_sz)
+{
+	ldns_rdf *rdf = 0;
+	if (ldns_knows_about_zonemd) {
+		rdf = ldns_rr_rdf(rr, 0);
+		assert(rdf);
+		if (LDNS_RDF_TYPE_INT32 != ldns_rdf_get_type(rdf))
+			errx(1, "%s(%d): %s RDF #1 expected type %u, but got type %u", __FILE__, __LINE__, RRNAME, LDNS_RDF_TYPE_INT32, ldns_rdf_get_type(rdf));
+		if (ret_serial)
+			*ret_serial = ldns_rdf2native_int32(rdf);
+		rdf = ldns_rr_rdf(rr, 1);
+		assert(rdf);
+		if (LDNS_RDF_TYPE_INT8 != ldns_rdf_get_type(rdf))
+			errx(1, "%s(%d): %s RDF #2 expected type %u, but got type %u", __FILE__, __LINE__, RRNAME, LDNS_RDF_TYPE_INT8, ldns_rdf_get_type(rdf));
+		if (ret_digest_type)
+			*ret_digest_type = ldns_rdf2native_int8(rdf);
+		rdf = ldns_rr_rdf(rr, 3);
+		assert(rdf);
+		if (LDNS_RDF_TYPE_HEX != ldns_rdf_get_type(rdf))
+			errx(1, "%s(%d): %s RDF #4 expected type %u, but got type %u", __FILE__, __LINE__, RRNAME, LDNS_RDF_TYPE_HEX, ldns_rdf_get_type(rdf));
+		if (ret_digest)
+			memcpy(ret_digest, ldns_rdf_data(rdf), digest_sz < ldns_rdf_size(rdf) ? digest_sz : ldns_rdf_size(rdf));
+	} else {
 		unsigned char *buf;
 		size_t rdlen;
-		rr = ldns_rr_list_rr(rrlist, i);
-		if (ldns_rr_get_type(rr) != LDNS_RR_TYPE_ZONEMD)
-			continue;
 		rdf = ldns_rr_rdf(rr, 0);
 		assert(rdf);
 		rdlen = ldns_rdf_size(rdf);
-		if (rdlen < 5)
+		if (rdlen < 6)
 			errx(1, "%s(%d): %s RR rdlen (%d) too short", __FILE__, __LINE__, RRNAME, (int) rdlen);
 		buf = ldns_rdf_data(rdf);
 		assert(buf);
@@ -276,44 +342,28 @@ zonemd_rr_find(uint32_t *ret_serial, uint8_t *ret_digest_type, void *ret_digest,
 		if (ret_digest_type)
 			memcpy(ret_digest_type, &buf[4], 1);
 		rdlen -= 1;
+		rdlen -= 1;	/* skip over reserved field */
 		if (ret_digest)
-			memcpy(ret_digest, &buf[5], digest_sz < rdlen ? digest_sz : rdlen);
-		ret = rr;
-		break;
+			memcpy(ret_digest, &buf[6], digest_sz < rdlen ? digest_sz : rdlen);
 	}
-	return ret;
 }
 
 /*
  * zonemd_rr_update_digest() 
  *
- * Updates the digest part of a placeholder ZONEMD record.  If the digest_buf pointer is NULL, the
+ * Updates the digest part of a placeholder ZONEMD record.  If the new_digest_buf pointer is NULL, the
  * digest value is set to all zeroes.
  */
 void
-zonemd_rr_update_digest(ldns_rr * rr, uint8_t digest_type, unsigned char *digest_buf, unsigned int digest_len)
+zonemd_rr_update_digest(ldns_rr * rr, uint8_t new_digest_type, unsigned char *new_digest_buf, unsigned int new_digest_len)
 {
-	uint8_t rr_digest_type = 0;
-	ldns_rdf *rdf = 0;
-	unsigned char *buf = 0;
-
-	rdf = ldns_rr_pop_rdf(rr);
-	assert(rdf);
-	buf = ldns_rdf_data(rdf);
-	assert(buf);
-
-	if (ldns_rdf_size(rdf) != 4 + 1 + digest_len)
-		errx(1, "%s(%d): zonemd_rr_update_digest expected rdata size %u but got %zu\n", __FILE__, __LINE__, 4 + 1 + digest_len, ldns_rdf_size(rdf));
-
-	memcpy(&rr_digest_type, &buf[4], 1);
-	if (rr_digest_type != digest_type)
-		errx(1, "%s(%d): zonemd_rr_update_digest mismatched digest type.  Found %u but wanted %u.", __FILE__, __LINE__, rr_digest_type, digest_type);
-
-	if (digest_buf)
-		memcpy(&buf[5], digest_buf, digest_len);
-	else
-		memset(&buf[5], 0, digest_len);
-	ldns_rr_push_rdf(rr, rdf);
+	uint32_t old_serial = 0;
+	uint8_t old_digest_type;
+	unsigned char old_digest_buf[EVP_MAX_MD_SIZE];
+	zonemd_rr_unpack(rr, &old_serial, &old_digest_type, old_digest_buf, sizeof(old_digest_buf));
+	if (old_digest_type != new_digest_type)
+		errx(1, "%s(%d): zonemd_rr_update_digest mismatched digest type.  Found %u but wanted %u.", __FILE__, __LINE__, old_digest_type, new_digest_type);
+	zonemd_rr_pack(rr, old_serial, old_digest_type, new_digest_buf, new_digest_len);
 }
 
 /*
@@ -405,7 +455,7 @@ zonemd_rrlist_digest(ldns_rr_list *rrlist, EVP_MD_CTX *ctx, unsigned char *buf)
 		size_t sz;
 		ldns_rr *rr = ldns_rr_list_rr(rrlist, i);
 		if (ldns_rr_get_type(rr) == LDNS_RR_TYPE_RRSIG)
-			if (my_typecovered(rr) == LDNS_RR_TYPE_ZONEMD)
+			if (my_typecovered(rr) == ZONEMD_RR_TYPE)
 				continue;
 #if DEBUG
 		char *s = ldns_rr2str(rr);
@@ -508,7 +558,7 @@ zonemd_resign(ldns_rr * rr, const char *zsk_fname)
 	if (rrsig == 0)
 		errx(1, "%s(%d): ldns_sign_public() failed", __FILE__, __LINE__);
 
-	zonemd_remove_rr(LDNS_RR_TYPE_RRSIG, LDNS_RR_TYPE_ZONEMD);
+	zonemd_remove_rr(LDNS_RR_TYPE_RRSIG, ZONEMD_RR_TYPE);
 	for (i = 0; i < ldns_rr_list_rr_count(rrsig); i++)
 		zonemd_add_rr(ldns_rr_list_rr(rrsig, i));
 	ldns_key_list_free(keys);
@@ -623,14 +673,15 @@ zonemd_add_placeholder(uint8_t digest_type, unsigned int digest_len)
 
 	if (!quiet)
 		fprintf(stderr, "Remove existing ZONEMD...\n");
-	zonemd_remove_rr(LDNS_RR_TYPE_ZONEMD, 0);
+	zonemd_remove_rr(ZONEMD_RR_TYPE, 0);
 
 	soa_serial_rdf = ldns_rr_rdf(the_soa, 2);
 	soa_serial = ldns_rdf2native_int32(soa_serial_rdf);
 
 	digest_buf = calloc(1, digest_len);
 	assert(digest_buf);
-	zonemd = zonemd_rr_pack(ldns_rr_owner(the_soa), ldns_rr_ttl(the_soa), soa_serial, digest_type, digest_buf, digest_len);
+	zonemd = zonemd_rr_create(ldns_rr_owner(the_soa), ldns_rr_ttl(the_soa));
+	zonemd_rr_pack(zonemd, soa_serial, digest_type, digest_buf, digest_len);
 	free(digest_buf);
 
 	if (!quiet)
@@ -765,9 +816,10 @@ do_calculate(const char *zsk_fname)
 	const EVP_MD *md = 0;
 	unsigned char *md_buf = 0;
 	unsigned int md_len = 0;
-	ldns_rr *zonemd_rr = zonemd_rr_find(0, &found_digest_type, 0, 0);
+	ldns_rr *zonemd_rr = zonemd_rr_find();
 	if (!zonemd_rr)
 		errx(1, "%s(%d): No %s record found in zone.  Use -p to add one.", __FILE__, __LINE__, RRNAME);
+	zonemd_rr_unpack(zonemd_rr, 0, &found_digest_type, 0, 0);
 	md = zonemd_digester(found_digest_type);
 	md_len = EVP_MD_size(md);
 	zonemd_rr_update_digest(zonemd_rr, found_digest_type, 0, md_len);	/* zero digest part */
@@ -799,9 +851,10 @@ do_verify()
 	const EVP_MD *md = 0;
 	unsigned char *md_buf = 0;
 	unsigned int md_len = 0;
-	ldns_rr *zonemd_rr = zonemd_rr_find(&found_serial, &found_digest_type, found_digest_buf, sizeof(found_digest_buf));
+	ldns_rr *zonemd_rr = zonemd_rr_find();
 	if (!zonemd_rr)
 		errx(1, "%s(%d): No %s record found in zone, cannot verify.", __FILE__, __LINE__, RRNAME);
+	zonemd_rr_unpack(zonemd_rr, &found_serial, &found_digest_type, found_digest_buf, sizeof(found_digest_buf));
 	soa_serial_rdf = ldns_rr_rdf(the_soa, 2);
 	soa_serial = ldns_rdf2native_int32(soa_serial_rdf);
 	if (found_serial != soa_serial) {
@@ -833,6 +886,22 @@ do_verify()
 	free(md_buf);
 #endif
 	return rc;
+}
+
+void
+probe_ldns(const char *origin_str)
+{
+	ldns_rr *rr;
+	ldns_rdf *origin = ldns_rdf_new_frm_str(LDNS_RDF_TYPE_DNAME, origin_str);
+	ldns_status status = ldns_rr_new_frm_str (&rr, "test 300 IN ZONEMD 123456789 2 0 deadbeef", 0, origin, 0);
+	fdebugf(stderr, "%s(%d): probe_ldns: %s\n", __FILE__, __LINE__, ldns_get_errorstr_by_id(status));
+	if (LDNS_STATUS_OK == status) {
+		ldns_knows_about_zonemd = 1;
+		ZONEMD_RR_TYPE = ldns_rr_get_type(rr);
+	}
+	ldns_rdf_free(origin);
+	if (rr)
+		ldns_rr_free(rr);
 }
 
 int
@@ -904,6 +973,8 @@ main(int argc, char *argv[])
 		if (0 == input)
 			err(1, "%s(%d): %s", __FILE__, __LINE__, argv[1]);
 	}
+
+	probe_ldns(origin_str);
 
 	my_getrusage(&t0);
 
