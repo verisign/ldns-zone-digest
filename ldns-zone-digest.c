@@ -263,7 +263,7 @@ zonemd_rr_pack(ldns_rr *rr, uint32_t serial, uint8_t digest_type, void *digest, 
 		memcpy(&buf[4], &digest_type, 1);
 		if (digest && digest_sz)
 			memcpy(&buf[6], digest, digest_sz);
-			ldns_rdf *rdf = ldns_rdf_new_frm_data(LDNS_RDF_TYPE_UNKNOWN, 4 + 1 + 1 + digest_sz, buf);
+		ldns_rdf *rdf = ldns_rdf_new_frm_data(LDNS_RDF_TYPE_UNKNOWN, 4 + 1 + 1 + digest_sz, buf);
 		assert(rdf);
 		ldns_rr_push_rdf(rr, rdf);
 		free(buf);
@@ -446,7 +446,7 @@ zonemd_remove_rr(ldns_rr_type type, ldns_rr_type covered)
  * Loops over an rrlist and calls the digest update function on each RR.
  */
 void
-zonemd_rrlist_digest(ldns_rr_list *rrlist, EVP_MD_CTX *ctx, unsigned char *buf)
+zonemd_rrlist_digest(ldns_rr_list *rrlist, EVP_MD_CTX *ctx)
 {
 	unsigned int i;
 	ldns_status status;
@@ -485,6 +485,7 @@ zonemd_calc_digest(void *arg, const EVP_MD *md, unsigned char *buf)
 {
 	EVP_MD_CTX *ctx;
 #if !ZONEMD_INCREMENTAL
+	(void)(arg); /* skip warning: unused parameter 'arg' */
 	if (!quiet)
 		fprintf(stderr, "Calculating Digest...");
 #else
@@ -498,7 +499,7 @@ zonemd_calc_digest(void *arg, const EVP_MD *md, unsigned char *buf)
 	if (!EVP_DigestInit(ctx, md))
 		errx(1, "%s(%d): Digest init failed", __FILE__, __LINE__);
 #if !ZONEMD_INCREMENTAL
-	zonemd_rrlist_digest(the_rrlist, ctx, buf);
+	zonemd_rrlist_digest(the_rrlist, ctx);
 #else
 	if (zonemd_tree_max_depth > node->depth) {
 		unsigned int branch;
@@ -513,7 +514,7 @@ zonemd_calc_digest(void *arg, const EVP_MD *md, unsigned char *buf)
 	} else {
 		assert(node->rrlist);
 		ldns_rr_list_sort(node->rrlist);
-		zonemd_rrlist_digest(node->rrlist, ctx, buf);
+		zonemd_rrlist_digest(node->rrlist, ctx);
 	}
 #endif
 	if (!EVP_DigestFinal_ex(ctx, buf, 0))
@@ -844,7 +845,7 @@ do_calculate(const char *zsk_fname)
 }
 
 int
-do_verify()
+do_verify(void)
 {
 	int rc = 0;
 	uint8_t found_digest_type;
@@ -866,7 +867,7 @@ do_verify()
 		rc |= 1;
 	}
 	md = zonemd_digester(found_digest_type);
-	assert(EVP_MD_size(md) <= sizeof(found_digest_buf));
+	assert(EVP_MD_size(md) <= (int) sizeof(found_digest_buf));
 	md_len = EVP_MD_size(md);
 	zonemd_rr_update_digest(zonemd_rr, found_digest_type, 0, md_len);	/* zero digest part */
 #if ZONEMD_INCREMENTAL
