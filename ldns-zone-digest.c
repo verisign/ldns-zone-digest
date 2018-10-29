@@ -896,7 +896,7 @@ do_verify(void)
 void
 probe_ldns(const char *origin_str)
 {
-	ldns_rr *rr = NULL;
+	ldns_rr *rr = 0;
 	ldns_rdf *origin = ldns_rdf_new_frm_str(LDNS_RDF_TYPE_DNAME, origin_str);
 	ldns_status status = ldns_rr_new_frm_str (&rr, "test 300 IN ZONEMD 123456789 2 0 deadbeef", 0, origin, 0);
 	fdebugf(stderr, "%s(%d): probe_ldns: %s\n", __FILE__, __LINE__, ldns_get_errorstr_by_id(status));
