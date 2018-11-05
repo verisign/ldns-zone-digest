@@ -747,7 +747,8 @@ zonemd_read_zone(const char *origin_str, FILE * fp, uint32_t ttl, ldns_rr_class 
 		} else {
 			/* out-of-zone */
 			char *s = ldns_rdf2str(ldns_rr_owner(rr));
-			warnx("Ignoring out-of-zone data for '%s'", s);
+			assert(s);
+			warnx("%s(%d): Ignoring out-of-zone data for '%s'", __FILE__, __LINE__, s);
 			free(s);
 			ldns_rr_list_push_rr(tbflist, rr);
 			continue;
