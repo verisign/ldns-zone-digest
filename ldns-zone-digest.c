@@ -450,6 +450,7 @@ zonemd_rrlist_digest(ldns_rr_list *rrlist, EVP_MD_CTX *ctx)
 {
 	unsigned int i;
 	ldns_status status;
+	ldns_rr *prev = 0;
 	/*
 	 * thankfully ldns_rr_list_sort() already sorts by RRtype for same owner name
 	 */
@@ -458,6 +459,14 @@ zonemd_rrlist_digest(ldns_rr_list *rrlist, EVP_MD_CTX *ctx)
 		uint8_t *wire_buf;
 		size_t sz;
 		ldns_rr *rr = ldns_rr_list_rr(rrlist, i);
+		if (prev && ldns_rr_compare(rr, prev) == 0) {
+			char *s = ldns_rr2str(rr);
+			assert(s);
+			warnx("%s(%d): Ignoring duplicate RR: %s\n", __FILE__, __LINE__, s);
+			free(s);
+			continue;
+		}
+		prev = rr;
 		if (ldns_rr_get_type(rr) == LDNS_RR_TYPE_RRSIG)
 			if (my_typecovered(rr) == ZONEMD_RR_TYPE)
 				continue;
