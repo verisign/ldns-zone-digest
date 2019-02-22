@@ -622,10 +622,6 @@ zonemd_digester(uint8_t type)
 	const EVP_MD *md = 0;
 	OpenSSL_add_all_digests();
 	if (type == 1) {
-		name = "sha1";
-	} else if (type == 2) {
-		name = "sha256";
-	} else if (type == 4) {
 		name = "sha384";
 	} else {
 		errx(1, "%s(%d): Unsupported digest type %u", __FILE__, __LINE__, type);
