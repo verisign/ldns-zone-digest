@@ -10,12 +10,12 @@ root.zone.hashed: root.zone.signed
 	rm -fv $@_
 
 root.zone.signed: root.zone.placeholder
-	ldns-signzone -f $@_ root.zone.placeholder Keys/K.+008+21544 Keys/K.+008+17913
+	/usr/local/bin/ldns-signzone -f $@_ root.zone.placeholder Keys/K.+008+21544 Keys/K.+008+17913
 	${READZONE} $@_ > $@
 	rm -fv $@_
 
 root.zone.placeholder: root.zone.unsigned
-	${ZONEHASH} -p 2 -o $@_ . root.zone.unsigned
+	${ZONEHASH} -p 1 -o $@_ . root.zone.unsigned
 	${READZONE} $@_ > $@
 	rm -fv $@_
 
