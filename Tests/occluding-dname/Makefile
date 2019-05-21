@@ -1,1 +1,1 @@
-../sha1/Makefile
+../sha384/Makefile
