@@ -639,7 +639,7 @@ usage(const char *p)
 	fprintf(stderr, "\t-c\t\tcalculate the zone digest\n");
 	fprintf(stderr, "\t-o file\t\twrite zone to output file\n");
 	fprintf(stderr, "\t-u file\t\tfile containing RR updates\n");
-	fprintf(stderr, "\t-p type\t\tinsert placeholder record of type (1, 2, 4)\n");
+	fprintf(stderr, "\t-p type\t\tinsert placeholder record of type\n");
 	fprintf(stderr, "\t-v\t\tverify the zone digest\n");
 	fprintf(stderr, "\t-z\t\tZSK file name\n");
 #if ZONEMD_INCREMENTAL
