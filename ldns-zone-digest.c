@@ -623,6 +623,24 @@ zonemd_digester(uint8_t type)
 	OpenSSL_add_all_digests();
 	if (type == 1) {
 		name = "sha384";
+	} else if (type == 250) {
+		name = "md4";
+	} else if (type == 251) {
+		name = "md5";
+	} else if (type == 252) {
+		name = "ripemd160";
+	} else if (type == 253) {
+		name = "sha";
+	} else if (type == 254) {
+		name = "sha1";
+	} else if (type == 255) {
+		name = "sha224";
+	} else if (type == 256) {
+		name = "sha256";
+	} else if (type == 257) {
+		name = "sha512";
+	} else if (type == 258) {
+		name = "whirlpool";
 	} else {
 		errx(1, "%s(%d): Unsupported digest type %u", __FILE__, __LINE__, type);
 	}
