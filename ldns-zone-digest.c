@@ -54,6 +54,8 @@ const char *RRNAME = "ZONEMD";
 static ldns_rdf *origin = 0;
 ldns_rr *the_soa = 0;
 
+#define MAX_ZONEMD_COUNT 10
+
 #if !ZONEMD_INCREMENTAL
 ldns_rr_list *the_rrlist = 0;
 #endif
@@ -236,8 +238,10 @@ zonemd_rr_create(ldns_rdf * owner, uint32_t ttl)
 void
 zonemd_rr_pack(ldns_rr *rr, uint32_t serial, uint8_t digest_type, void *digest, size_t digest_sz)
 {
-	while (ldns_rr_rd_count(rr) > 0)
-	    ldns_rr_pop_rdf (rr);
+	while (ldns_rr_rd_count(rr) > 0) {
+		ldns_rdf *rdf = ldns_rr_pop_rdf (rr);
+		ldns_rdf_deep_free(rdf);
+	}
 	if (ldns_knows_about_zonemd) {
 		char *tbuf = 0;
 		if (digest == 0)
@@ -273,14 +277,16 @@ zonemd_rr_pack(ldns_rr *rr, uint32_t serial, uint8_t digest_type, void *digest, 
 /*
  * zonemd_rr_find()
  *
- * This function searches through the zone data and returns the first ZONEMD record found.
+ * This function searches through the zone data and returns a list of ZONEMD records found.
  */
-ldns_rr *
+ldns_rr_list *
 zonemd_rr_find(void)
 {
-	ldns_rr *ret = 0;
+	ldns_rr_list *ret = 0;
 	ldns_rr_list *rrlist;
 	unsigned int i;
+	ret = ldns_rr_list_new();
+	assert(ret);
 #if !ZONEMD_INCREMENTAL
 	rrlist = the_rrlist;
 #else
@@ -294,8 +300,7 @@ zonemd_rr_find(void)
 			continue;
 		if (ldns_dname_compare(ldns_rr_owner(rr), origin) != 0)
 			continue;
-		ret = rr;
-		break;
+		ldns_rr_list_push_rr(ret, rr);
 	}
 	return ret;
 }
@@ -440,6 +445,46 @@ zonemd_remove_rr(ldns_rr_type type, ldns_rr_type covered)
 }
 
 /*
+ * zonemd_digester()
+ *
+ * wrapper around EVP_get_digestbyname() and so we can reference by number
+ */
+const EVP_MD *
+zonemd_digester(uint8_t type)
+{
+	const char *name = 0;
+	const EVP_MD *md = 0;
+	OpenSSL_add_all_digests();
+	if (type == 1) {
+		name = "sha384";
+	} else if (type == 240) {
+		name = "md4";
+	} else if (type == 241) {
+		name = "md5";
+	} else if (type == 242) {
+		name = "ripemd160";
+	} else if (type == 243) {
+		name = "sha";
+	} else if (type == 244) {
+		name = "sha1";
+	} else if (type == 245) {
+		name = "sha224";
+	} else if (type == 246) {
+		name = "sha256";
+	} else if (type == 247) {
+		name = "sha512";
+	} else if (type == 248) {
+		name = "whirlpool";
+	} else {
+		errx(1, "%s(%d): Unsupported digest type %u", __FILE__, __LINE__, type);
+	}
+	md = EVP_get_digestbyname(name);
+	if (md == 0)
+		errx(1, "%s(%d): Unknown message digest '%s'", __FILE__, __LINE__, name);
+	return md;
+}
+
+/*
  *
  * zonemd_rrlist_digest()
  *
@@ -459,6 +504,7 @@ zonemd_rrlist_digest(ldns_rr_list *rrlist, EVP_MD_CTX *ctx)
 		uint8_t *wire_buf;
 		size_t sz;
 		ldns_rr *rr = ldns_rr_list_rr(rrlist, i);
+		ldns_rr *rr_copy = 0;
 		if (prev && ldns_rr_compare(rr, prev) == 0) {
 			char *s = ldns_rr2str(rr);
 			assert(s);
@@ -467,9 +513,29 @@ zonemd_rrlist_digest(ldns_rr_list *rrlist, EVP_MD_CTX *ctx)
 			continue;
 		}
 		prev = rr;
+		/*
+		 * Don't include RRSIG over ZONEMD in the digest
+		 */
 		if (ldns_rr_get_type(rr) == LDNS_RR_TYPE_RRSIG)
 			if (my_typecovered(rr) == ZONEMD_RR_TYPE)
 				continue;
+		/*
+		 * For ZONEMD RRs at apex, create a copy with digest zeroized
+		 */
+		if (ldns_rr_get_type(rr) == LDNS_RR_TYPE_ZONEMD && ldns_dname_compare(ldns_rr_owner(rr), origin) == 0) {
+			uint8_t type = 0;
+			unsigned char digest[EVP_MAX_MD_SIZE];
+			unsigned int digest_len = 0;
+			uint32_t serial = 0;
+			const EVP_MD *md = 0;
+			rr_copy = ldns_rr_clone(rr);
+			zonemd_rr_unpack(rr_copy, &serial, &type, digest, sizeof(digest));
+			md = zonemd_digester(type);
+			assert(EVP_MD_size(md) <= (int) sizeof(digest));
+			digest_len = EVP_MD_size(md);
+			zonemd_rr_update_digest(rr_copy, type, 0, digest_len);	/* zero digest part */
+			rr = rr_copy;
+		}
 #if DEBUG
 		char *s = ldns_rr2str(rr);
 		fdebugf(stderr, "%s(%d): zonemd_rrlist_digest RR#%u: %s\n", __FILE__, __LINE__, i, s);
@@ -481,6 +547,8 @@ zonemd_rrlist_digest(ldns_rr_list *rrlist, EVP_MD_CTX *ctx)
 		if (!EVP_DigestUpdate(ctx, wire_buf, sz))
 			errx(1, "%s(%d): Digest update failed", __FILE__, __LINE__);
 		free(wire_buf);
+		if (rr_copy != 0)
+			ldns_rr_free(rr_copy);
 	}
 }
 
@@ -490,13 +558,13 @@ zonemd_rrlist_digest(ldns_rr_list *rrlist, EVP_MD_CTX *ctx)
  * Calculate a digest over the zone.
  */
 void
-zonemd_calc_digest(void *arg, const EVP_MD *md, unsigned char *buf)
+zonemd_calc_digest(void *arg, const EVP_MD *md, unsigned char *buf, uint8_t digest_type)
 {
 	EVP_MD_CTX *ctx;
 #if !ZONEMD_INCREMENTAL
 	(void)(arg); /* skip warning: unused parameter 'arg' */
 	if (!quiet)
-		fprintf(stderr, "Calculating Digest...");
+		fprintf(stderr, "Calculating Digest for type %u\n", digest_type);
 #else
 	zonemd_tree *node = arg;
 	fdebugf(stderr, "%s(%d): zonemd_calc_digest depth %u branch %u\n", __FILE__, __LINE__, node->depth, node->branch);
@@ -516,7 +584,7 @@ zonemd_calc_digest(void *arg, const EVP_MD *md, unsigned char *buf)
 		for (branch = 0; branch < zonemd_tree_max_width; branch++) {
 			if (node->kids[branch] == 0)
 				continue;
-			zonemd_calc_digest(node->kids[branch], md, (unsigned char *) node->digest);
+			zonemd_calc_digest(node->kids[branch], md, (unsigned char *) node->digest, digest_type);
 			if (!EVP_DigestUpdate(ctx, node->digest, EVP_MD_size(md)))
 				errx(1, "%s(%d): Digest update failed", __FILE__, __LINE__);
 		}
@@ -529,10 +597,7 @@ zonemd_calc_digest(void *arg, const EVP_MD *md, unsigned char *buf)
 	if (!EVP_DigestFinal_ex(ctx, buf, 0))
 		errx(1, "%s(%d): Digest final failed", __FILE__, __LINE__);
 	EVP_MD_CTX_destroy(ctx);
-#if !ZONEMD_INCREMENTAL
-	if (!quiet)
-		fprintf(stderr, "%s\n", "Done");
-#else
+#if ZONEMD_INCREMENTAL
 	node->dirty = false;
 #endif
 }
@@ -540,17 +605,16 @@ zonemd_calc_digest(void *arg, const EVP_MD *md, unsigned char *buf)
 /*
  * zonemd_resign()
  *
- * Calculate an RRSIG for the ZONEMD record ('rr' parameter).  Requires access to the private
+ * Calculate an RRSIG for the ZONEMD RRset ('rrset' parameter).  Requires access to the private
  * zone signing key.
  */
 void
-zonemd_resign(ldns_rr * rr, const char *zsk_fname)
+zonemd_resign(ldns_rr_list * rrset, const char *zsk_fname)
 {
 	FILE *fp = 0;
 	ldns_key *zsk = 0;
 	ldns_key_list *keys = 0;
 	ldns_status status;
-	ldns_rr_list *rrset = 0;
 	ldns_rr_list *rrsig = 0;
 	unsigned int i;
 
@@ -565,9 +629,6 @@ zonemd_resign(ldns_rr * rr, const char *zsk_fname)
 	assert(keys);
 	ldns_key_list_push_key(keys, zsk);
 
-	rrset = ldns_rr_list_new();
-	assert(rrset);
-	ldns_rr_list_push_rr(rrset, rr);
 	rrsig = ldns_sign_public(rrset, keys);
 	if (rrsig == 0)
 		errx(1, "%s(%d): ldns_sign_public() failed", __FILE__, __LINE__);
@@ -577,7 +638,6 @@ zonemd_resign(ldns_rr * rr, const char *zsk_fname)
 		zonemd_add_rr(ldns_rr_list_rr(rrsig, i));
 	ldns_key_list_free(keys);
 	ldns_rr_list_free(rrsig);
-	ldns_rr_list_free(rrset);
 }
 
 /*
@@ -608,46 +668,6 @@ zonemd_write_zone(FILE * fp)
 #if ZONEMD_INCREMENTAL
 	ldns_rr_list_free(rrlist);
 #endif
-}
-
-/*
- * zonemd_digester()
- *
- * wrapper around EVP_get_digestbyname() and so we can reference by number
- */
-const EVP_MD *
-zonemd_digester(uint8_t type)
-{
-	const char *name = 0;
-	const EVP_MD *md = 0;
-	OpenSSL_add_all_digests();
-	if (type == 1) {
-		name = "sha384";
-	} else if (type == 250) {
-		name = "md4";
-	} else if (type == 251) {
-		name = "md5";
-	} else if (type == 252) {
-		name = "ripemd160";
-	} else if (type == 253) {
-		name = "sha";
-	} else if (type == 254) {
-		name = "sha1";
-	} else if (type == 255) {
-		name = "sha224";
-	} else if (type == 256) {
-		name = "sha256";
-	} else if (type == 257) {
-		name = "sha512";
-	} else if (type == 258) {
-		name = "whirlpool";
-	} else {
-		errx(1, "%s(%d): Unsupported digest type %u", __FILE__, __LINE__, type);
-	}
-	md = EVP_get_digestbyname(name);
-	if (md == 0)
-		errx(1, "%s(%d): Unknown message digest '%s'", __FILE__, __LINE__, name);
-	return md;
 }
 
 void
@@ -686,35 +706,55 @@ elapsed_msec(struct timeval *a, struct timeval *b)
 }
 
 /*
- * zonemd_add_placeholder()
+ * zonemd_add_placeholders()
  *
  * Creates a placeholder ZONEMD record and adds it to 'zone'.  If 'zone' already
  * has a ZONEMD record, it is removed and discarded.
  */
 void
-zonemd_add_placeholder(uint8_t digest_type, unsigned int digest_len)
+zonemd_add_placeholders(uint8_t digest_types[], unsigned int digest_types_cnt)
 {
-	unsigned char *digest_buf = 0;
 	ldns_rdf *soa_serial_rdf = 0;
 	uint32_t soa_serial;
-	ldns_rr *zonemd = 0;
+	unsigned int i;
 
 	if (!quiet)
-		fprintf(stderr, "Remove existing ZONEMD...\n");
+		fprintf(stderr, "Remove existing ZONEMD RRset\n");
 	zonemd_remove_rr(ZONEMD_RR_TYPE, 0);
 
 	soa_serial_rdf = ldns_rr_rdf(the_soa, 2);
 	soa_serial = ldns_rdf2native_int32(soa_serial_rdf);
 
-	digest_buf = calloc(1, digest_len);
-	assert(digest_buf);
-	zonemd = zonemd_rr_create(ldns_rr_owner(the_soa), ldns_rr_ttl(the_soa));
-	zonemd_rr_pack(zonemd, soa_serial, digest_type, digest_buf, digest_len);
-	free(digest_buf);
+	for (i = 0; i < digest_types_cnt; i++) {
+		const EVP_MD *md = 0;
+		unsigned int digest_len = 0;
+		unsigned char *digest_buf = 0;
+		ldns_rr *zonemd = 0;
+		unsigned int j;
+		bool is_dupe = 0;
 
-	if (!quiet)
-		fprintf(stderr, "Add placeholder ZONEMD...\n");
-	zonemd_add_rr(zonemd);
+		for (j = 0; j < i; j++)
+			if (digest_types[i] == digest_types[j])
+				is_dupe |= 1;
+
+		if (is_dupe) {
+			fprintf(stderr, "Ignoring duplicate digest type %u\n", digest_types[i]);
+			continue;
+		}
+
+		md = zonemd_digester(digest_types[i]);
+		assert(md);
+		digest_len = EVP_MD_size(md);
+		assert(digest_len);
+		digest_buf = calloc(1, digest_len);
+		assert(digest_buf);
+		zonemd = zonemd_rr_create(ldns_rr_owner(the_soa), ldns_rr_ttl(the_soa));
+		zonemd_rr_pack(zonemd, soa_serial, digest_types[i], digest_buf, digest_len);
+		free(digest_buf);
+		if (!quiet)
+			fprintf(stderr, "Add placeholder ZONEMD with digest type %u\n", digest_types[i]);
+		zonemd_add_rr(zonemd);
+	}
 }
 
 /*
@@ -841,79 +881,87 @@ zonemd_zone_update(const char *update_file)
 void
 do_calculate(const char *zsk_fname)
 {
-	uint8_t found_digest_type;
-	const EVP_MD *md = 0;
-	unsigned char *md_buf = 0;
-	unsigned int md_len = 0;
-	ldns_rr *zonemd_rr = zonemd_rr_find();
-	if (!zonemd_rr)
+	ldns_rr_list *zonemd_rr_list = zonemd_rr_find();
+	unsigned int i;
+	if (!zonemd_rr_list)
 		errx(1, "%s(%d): No %s record found at zone apex.  Use -p to add one.", __FILE__, __LINE__, RRNAME);
-	zonemd_rr_unpack(zonemd_rr, 0, &found_digest_type, 0, 0);
-	md = zonemd_digester(found_digest_type);
-	md_len = EVP_MD_size(md);
-	zonemd_rr_update_digest(zonemd_rr, found_digest_type, 0, md_len);	/* zero digest part */
+	for (i = 0; i < ldns_rr_list_rr_count(zonemd_rr_list); i++) {
+		uint8_t found_digest_type = 0;
+		unsigned char *md_buf = 0;
+		unsigned int md_len = 0;
+		const EVP_MD *md = 0;
+		ldns_rr *zonemd_rr = ldns_rr_list_rr(zonemd_rr_list, i);
+		zonemd_rr_unpack(zonemd_rr, 0, &found_digest_type, 0, 0);
+		md = zonemd_digester(found_digest_type);
+		md_len = EVP_MD_size(md);
 #if !ZONEMD_INCREMENTAL
-	md_buf = calloc(1, md_len);
-	assert(md_buf);
-	zonemd_calc_digest(0, md, md_buf);
+		md_buf = calloc(1, md_len);
+		assert(md_buf);
+		zonemd_calc_digest(0, md, md_buf, found_digest_type);
 #else
-	md_buf = theTree->digest;
-	zonemd_calc_digest(theTree, md, md_buf);
+		md_buf = theTree->digest;
+		zonemd_calc_digest(theTree, md, md_buf, found_digest_type);
 #endif
-	zonemd_rr_update_digest(zonemd_rr, found_digest_type, md_buf, md_len);
+		zonemd_rr_update_digest(zonemd_rr, found_digest_type, md_buf, md_len);
 #if !ZONEMD_INCREMENTAL
-	free(md_buf);
+		free(md_buf);
 #endif
+	}
 	if (zsk_fname)
-		zonemd_resign(zonemd_rr, zsk_fname);
+		zonemd_resign(zonemd_rr_list, zsk_fname);
+	ldns_rr_list_free(zonemd_rr_list);
 }
 
 int
 do_verify(void)
 {
 	int rc = 0;
-	uint8_t found_digest_type;
-	unsigned char found_digest_buf[EVP_MAX_MD_SIZE];
-	uint32_t found_serial = 0;
-	ldns_rdf *soa_serial_rdf = 0;
-	uint32_t soa_serial = 0;
-	const EVP_MD *md = 0;
-	unsigned char *md_buf = 0;
-	unsigned int md_len = 0;
-	ldns_rr *zonemd_rr = zonemd_rr_find();
-	if (!zonemd_rr)
+	ldns_rr_list *zonemd_rr_list = zonemd_rr_find();
+	unsigned int i;
+	if (!zonemd_rr_list)
 		errx(1, "%s(%d): No %s record found at zone apex, cannot verify.", __FILE__, __LINE__, RRNAME);
-	zonemd_rr_unpack(zonemd_rr, &found_serial, &found_digest_type, found_digest_buf, sizeof(found_digest_buf));
-	soa_serial_rdf = ldns_rr_rdf(the_soa, 2);
-	soa_serial = ldns_rdf2native_int32(soa_serial_rdf);
-	if (found_serial != soa_serial) {
-		fprintf(stderr, "%s(%d): SOA serial (%u) does not match ZONEMD serial (%u)\n", __FILE__, __LINE__, soa_serial, found_serial);
-		rc |= 1;
-	}
-	md = zonemd_digester(found_digest_type);
-	assert(EVP_MD_size(md) <= (int) sizeof(found_digest_buf));
-	md_len = EVP_MD_size(md);
-	zonemd_rr_update_digest(zonemd_rr, found_digest_type, 0, md_len);	/* zero digest part */
+	for (i = 0; i < ldns_rr_list_rr_count(zonemd_rr_list); i++) {
+		uint8_t found_digest_type;
+		unsigned char found_digest_buf[EVP_MAX_MD_SIZE];
+		uint32_t found_serial = 0;
+		ldns_rdf *soa_serial_rdf = 0;
+		uint32_t soa_serial = 0;
+		const EVP_MD *md = 0;
+		unsigned char *md_buf = 0;
+		unsigned int md_len = 0;
+		ldns_rr *zonemd_rr = ldns_rr_list_rr(zonemd_rr_list, i);
+		zonemd_rr_unpack(zonemd_rr, &found_serial, &found_digest_type, found_digest_buf, sizeof(found_digest_buf));
+		soa_serial_rdf = ldns_rr_rdf(the_soa, 2);
+		soa_serial = ldns_rdf2native_int32(soa_serial_rdf);
+		if (found_serial != soa_serial) {
+			fprintf(stderr, "%s(%d): SOA serial (%u) does not match ZONEMD serial (%u)\n", __FILE__, __LINE__, soa_serial, found_serial);
+			rc |= 1;
+		}
+		md = zonemd_digester(found_digest_type);
+		assert(EVP_MD_size(md) <= (int) sizeof(found_digest_buf));
+		md_len = EVP_MD_size(md);
 #if ZONEMD_INCREMENTAL
-	md_buf = theTree->digest;
-	zonemd_calc_digest(theTree, md, md_buf);
+		md_buf = theTree->digest;
+		zonemd_calc_digest(theTree, md, md_buf, found_digest_type);
 #else
-	md_buf = calloc(1, md_len);
-	assert(md_buf);
-	zonemd_calc_digest(0, md, md_buf);
+		md_buf = calloc(1, md_len);
+		assert(md_buf);
+		zonemd_calc_digest(0, md, md_buf, found_digest_type);
 #endif
-	if (memcmp(found_digest_buf, md_buf, md_len) != 0) {
-		fprintf(stderr, "Found and calculated digests do NOT match.\n");
-		zonemd_print_digest(stderr, "Found     : ", found_digest_buf, md_len, "\n");
-		zonemd_print_digest(stderr, "Calculated: ", md_buf, md_len, "\n");
-		rc |= 1;
-	} else {
-		if (!quiet)
-			fprintf(stderr, "Found and calculated digests do MATCH.\n");
-	}
+		if (memcmp(found_digest_buf, md_buf, md_len) != 0) {
+			fprintf(stderr, "Found and calculated digests do NOT match.\n");
+			zonemd_print_digest(stderr, "Found     : ", found_digest_buf, md_len, "\n");
+			zonemd_print_digest(stderr, "Calculated: ", md_buf, md_len, "\n");
+			rc |= 1;
+		} else {
+			if (!quiet)
+				fprintf(stderr, "Found and calculated digests do MATCH.\n");
+		}
 #if !ZONEMD_INCREMENTAL
-	free(md_buf);
+		free(md_buf);
 #endif
+	}
+	ldns_rr_list_free(zonemd_rr_list);
 	return rc;
 }
 
@@ -928,7 +976,7 @@ probe_ldns(const char *origin_str)
 		ldns_knows_about_zonemd = 1;
 		ZONEMD_RR_TYPE = ldns_rr_get_type(rr);
 	}
-	ldns_rdf_free(origin);
+	ldns_rdf_deep_free(origin);
 	if (rr)
 		ldns_rr_free(rr);
 }
@@ -943,7 +991,8 @@ main(int argc, char *argv[])
 	char *update_file = 0;
 	char *origin_str = 0;
 	char *zsk_fname = 0;
-	int placeholder = 0;
+	uint8_t algorithms[MAX_ZONEMD_COUNT];
+	unsigned int algorithms_cnt = 0;
 	int calculate = 0;
 	int verify = 0;
 	int print_timings = 0;
@@ -953,6 +1002,7 @@ main(int argc, char *argv[])
 	progname = strrchr(argv[0], '/');
 	if (0 == progname)
 		progname = argv[0];
+	memset(algorithms, 0, sizeof(algorithms));
 
 	while ((ch = getopt(argc, argv, "co:p:tu:vz:W:D:q")) != -1) {
 		switch (ch) {
@@ -963,7 +1013,8 @@ main(int argc, char *argv[])
 			output_file = strdup(optarg);
 			break;
 		case 'p':
-			placeholder = strtoul(optarg, 0, 10);
+			if (algorithms_cnt < MAX_ZONEMD_COUNT)
+				algorithms[algorithms_cnt++] = (uint8_t) strtoul(optarg, 0, 10);
 			break;
 		case 't':
 			print_timings = 1;
@@ -1020,10 +1071,8 @@ main(int argc, char *argv[])
 #endif
 	zonemd_read_zone(origin_str, input, 0, LDNS_RR_CLASS_IN);
 
-	if (placeholder) {
-		const EVP_MD *md = zonemd_digester(placeholder);
-		zonemd_add_placeholder(placeholder, EVP_MD_size(md));
-	}
+	if (algorithms_cnt)
+		zonemd_add_placeholders(algorithms, algorithms_cnt);
 	my_getrusage(&t1);
 	if (calculate)
 		do_calculate(zsk_fname);
@@ -1037,7 +1086,7 @@ main(int argc, char *argv[])
 			do_calculate(zsk_fname);
 	}
 	my_getrusage(&t4);
-	if (output_file && (placeholder || calculate)) {
+	if (output_file && (algorithms_cnt || calculate)) {
 		FILE *fp = fopen(output_file, "w");
 		if (!fp)
 			err(1, "%s(%d): %s", __FILE__, __LINE__, output_file);
