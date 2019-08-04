@@ -48,7 +48,7 @@
 
 int quiet = 0;
 
-static ldns_rr_type ZONEMD_RR_TYPE = 65317;
+static ldns_rr_type ZONEMD_RR_TYPE = 63;
 static int ldns_knows_about_zonemd = 0;
 const char *RRNAME = "ZONEMD";
 static ldns_rdf *origin = 0;
