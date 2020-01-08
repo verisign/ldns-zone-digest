@@ -248,15 +248,15 @@ zonemd_rr_pack(ldns_rr *rr, uint32_t serial, uint8_t digest_type, void *digest, 
 			digest = tbuf = calloc(1, digest_sz);
 		ldns_rdf *rdf_serial = ldns_native2rdf_int32(LDNS_RDF_TYPE_INT32, serial);
 		ldns_rdf *rdf_digtype = ldns_native2rdf_int8(LDNS_RDF_TYPE_INT8, digest_type);
-		ldns_rdf *rdf_reserved = ldns_native2rdf_int8(LDNS_RDF_TYPE_INT8, 0);	/* reserved */
+		ldns_rdf *rdf_parameter = ldns_native2rdf_int8(LDNS_RDF_TYPE_INT8, 0);	/* parameter */
 		ldns_rdf *rdf_digest = ldns_rdf_new_frm_data(LDNS_RDF_TYPE_HEX, digest_sz, digest);
 		assert(rdf_serial);
 		assert(rdf_digtype);
-		assert(rdf_reserved);
+		assert(rdf_parameter);
 		assert(rdf_digest);
 		ldns_rr_push_rdf(rr, rdf_serial);
 		ldns_rr_push_rdf(rr, rdf_digtype);
-		ldns_rr_push_rdf(rr, rdf_reserved);
+		ldns_rr_push_rdf(rr, rdf_parameter);
 		ldns_rr_push_rdf(rr, rdf_digest);
 		if (tbuf)
 			free(tbuf);
@@ -349,7 +349,7 @@ zonemd_rr_unpack(ldns_rr *rr, uint32_t *ret_serial, uint8_t *ret_digest_type, vo
 		if (ret_digest_type)
 			memcpy(ret_digest_type, &buf[4], 1);
 		rdlen -= 1;
-		rdlen -= 1;	/* skip over reserved field */
+		rdlen -= 1;	/* skip over parameter field */
 		if (ret_digest)
 			memcpy(ret_digest, &buf[6], digest_sz < rdlen ? digest_sz : rdlen);
 	}
