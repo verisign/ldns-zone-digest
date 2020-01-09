@@ -244,7 +244,7 @@ zonemd_rr_create(ldns_rdf * owner, uint32_t ttl)
  * This function packs ZONEMD rdata into an existing RR.
  */
 void
-zonemd_rr_pack(ldns_rr *rr, uint32_t serial, uint8_t digest_type, void *digest, size_t digest_sz)
+zonemd_rr_pack(ldns_rr *rr, uint32_t serial, uint8_t digest_type, uint8_t parameter, void *digest, size_t digest_sz)
 {
 	while (ldns_rr_rd_count(rr) > 0) {
 		ldns_rdf *rdf = ldns_rr_pop_rdf (rr);
@@ -256,7 +256,7 @@ zonemd_rr_pack(ldns_rr *rr, uint32_t serial, uint8_t digest_type, void *digest, 
 			digest = tbuf = calloc(1, digest_sz);
 		ldns_rdf *rdf_serial = ldns_native2rdf_int32(LDNS_RDF_TYPE_INT32, serial);
 		ldns_rdf *rdf_digtype = ldns_native2rdf_int8(LDNS_RDF_TYPE_INT8, digest_type);
-		ldns_rdf *rdf_parameter = ldns_native2rdf_int8(LDNS_RDF_TYPE_INT8, 0);	/* parameter */
+		ldns_rdf *rdf_parameter = ldns_native2rdf_int8(LDNS_RDF_TYPE_INT8, parameter);
 		ldns_rdf *rdf_digest = ldns_rdf_new_frm_data(LDNS_RDF_TYPE_HEX, digest_sz, digest);
 		assert(rdf_serial);
 		assert(rdf_digtype);
@@ -319,7 +319,7 @@ zonemd_rr_find(void)
  * This function unpacks ZONEMD fields into the ret_ paramaters.
  */
 void
-zonemd_rr_unpack(ldns_rr *rr, uint32_t *ret_serial, uint8_t *ret_digest_type, void *ret_digest, unsigned int *ret_digest_sz)
+zonemd_rr_unpack(ldns_rr *rr, uint32_t *ret_serial, uint8_t *ret_digest_type, uint8_t *ret_parameter, void *ret_digest, unsigned int *ret_digest_sz)
 {
 	ldns_rdf *rdf = 0;
 	if (ldns_knows_about_zonemd) {
@@ -335,6 +335,12 @@ zonemd_rr_unpack(ldns_rr *rr, uint32_t *ret_serial, uint8_t *ret_digest_type, vo
 			errx(1, "%s(%d): %s RDF #2 expected type %u, but got type %u", __FILE__, __LINE__, RRNAME, LDNS_RDF_TYPE_INT8, ldns_rdf_get_type(rdf));
 		if (ret_digest_type)
 			*ret_digest_type = ldns_rdf2native_int8(rdf);
+		rdf = ldns_rr_rdf(rr, 2);
+		assert(rdf);
+		if (LDNS_RDF_TYPE_INT8 != ldns_rdf_get_type(rdf))
+			errx(1, "%s(%d): %s RDF #3 expected type %u, but got type %u", __FILE__, __LINE__, RRNAME, LDNS_RDF_TYPE_INT8, ldns_rdf_get_type(rdf));
+		if (ret_parameter)
+			*ret_parameter = ldns_rdf2native_int8(rdf);
 		rdf = ldns_rr_rdf(rr, 3);
 		assert(rdf);
 		if (LDNS_RDF_TYPE_HEX != ldns_rdf_get_type(rdf))
@@ -360,7 +366,9 @@ zonemd_rr_unpack(ldns_rr *rr, uint32_t *ret_serial, uint8_t *ret_digest_type, vo
 		if (ret_digest_type)
 			memcpy(ret_digest_type, &buf[4], 1);
 		rdlen -= 1;
-		rdlen -= 1;	/* skip over parameter field */
+		if (ret_digest_type)
+			memcpy(ret_parameter, &buf[4], 1);
+		rdlen -= 1;
 		if (ret_digest) {
 			assert(ret_digest_sz);
 			*ret_digest_sz = uimin(*ret_digest_sz, rdlen);
@@ -376,16 +384,15 @@ zonemd_rr_unpack(ldns_rr *rr, uint32_t *ret_serial, uint8_t *ret_digest_type, vo
  * digest value is set to all zeroes.
  */
 void
-zonemd_rr_update_digest(ldns_rr * rr, uint8_t new_digest_type, unsigned char *new_digest_buf, unsigned int new_digest_len)
+zonemd_rr_update_digest(ldns_rr * rr, unsigned char *new_digest_buf, unsigned int new_digest_len)
 {
-	uint32_t old_serial = 0;
-	uint8_t old_digest_type;
+	uint32_t serial = 0;
+	uint8_t digest_type;
+	uint8_t parameter;
         unsigned int old_digest_sz = EVP_MAX_MD_SIZE;
 	unsigned char old_digest_buf[EVP_MAX_MD_SIZE];
-	zonemd_rr_unpack(rr, &old_serial, &old_digest_type, old_digest_buf, &old_digest_sz);
-	if (old_digest_type != new_digest_type)
-		errx(1, "%s(%d): zonemd_rr_update_digest mismatched digest type.  Found %u but wanted %u.", __FILE__, __LINE__, old_digest_type, new_digest_type);
-	zonemd_rr_pack(rr, old_serial, old_digest_type, new_digest_buf, new_digest_len);
+	zonemd_rr_unpack(rr, &serial, &digest_type, &parameter, old_digest_buf, &old_digest_sz);
+	zonemd_rr_pack(rr, serial, digest_type, parameter, new_digest_buf, new_digest_len);
 }
 
 /*
@@ -522,18 +529,19 @@ zonemd_rrlist_digest(ldns_rr_list *rrlist, EVP_MD_CTX *ctx)
 		 */
 		if (ldns_rr_get_type(rr) == LDNS_RR_TYPE_ZONEMD && ldns_dname_compare(ldns_rr_owner(rr), origin) == 0) {
 			uint8_t type = 0;
+			uint8_t parameter = 0;
 			unsigned char digest[EVP_MAX_MD_SIZE];
 			unsigned int digest_len = EVP_MAX_MD_SIZE;
 			uint32_t serial = 0;
 			const EVP_MD *md = 0;
 			rr_copy = ldns_rr_clone(rr);
-			zonemd_rr_unpack(rr_copy, &serial, &type, digest, &digest_len);
+			zonemd_rr_unpack(rr_copy, &serial, &type, &parameter, digest, &digest_len);
 			md = zonemd_digester(type);
 			if (md != 0) {
 				assert(EVP_MD_size(md) <= (int) sizeof(digest));
 				digest_len = EVP_MD_size(md);
 			}
-			zonemd_rr_update_digest(rr_copy, type, 0, digest_len);	/* zero digest part */
+			zonemd_rr_update_digest(rr_copy, 0, digest_len);	/* zero digest part */
 			rr = rr_copy;
 		}
 #if DEBUG
@@ -558,13 +566,13 @@ zonemd_rrlist_digest(ldns_rr_list *rrlist, EVP_MD_CTX *ctx)
  * Calculate a digest over the zone.
  */
 void
-zonemd_calc_digest(void *arg, const EVP_MD *md, unsigned char *buf, uint8_t digest_type)
+zonemd_calc_digest(void *arg, const EVP_MD *md, unsigned char *buf, uint8_t digest_type, uint8_t parameter)
 {
 	EVP_MD_CTX *ctx;
 #if !ZONEMD_INCREMENTAL
 	(void)(arg); /* skip warning: unused parameter 'arg' */
 	if (!quiet)
-		fprintf(stderr, "Calculating Digest for type %u\n", digest_type);
+		fprintf(stderr, "Calculating Digest for type %u,%u\n", digest_type, parameter);
 #else
 	zonemd_tree *node = arg;
 	fdebugf(stderr, "%s(%d): zonemd_calc_digest depth %u branch %u\n", __FILE__, __LINE__, node->depth, node->branch);
@@ -584,7 +592,7 @@ zonemd_calc_digest(void *arg, const EVP_MD *md, unsigned char *buf, uint8_t dige
 		for (branch = 0; branch < zonemd_tree_max_width; branch++) {
 			if (node->kids[branch] == 0)
 				continue;
-			zonemd_calc_digest(node->kids[branch], md, (unsigned char *) node->digest, digest_type);
+			zonemd_calc_digest(node->kids[branch], md, (unsigned char *) node->digest, digest_type, parameter);
 			if (!EVP_DigestUpdate(ctx, node->digest, EVP_MD_size(md)))
 				errx(1, "%s(%d): Digest update failed", __FILE__, __LINE__);
 		}
@@ -712,7 +720,7 @@ elapsed_msec(struct timeval *a, struct timeval *b)
  * has a ZONEMD record, it is removed and discarded.
  */
 void
-zonemd_add_placeholders(uint8_t digest_types[], unsigned int digest_types_cnt)
+zonemd_add_placeholders(uint8_t digest_types[], uint8_t parameters[], unsigned int digest_types_cnt)
 {
 	ldns_rdf *soa_serial_rdf = 0;
 	uint32_t soa_serial;
@@ -749,7 +757,7 @@ zonemd_add_placeholders(uint8_t digest_types[], unsigned int digest_types_cnt)
 		digest_buf = calloc(1, digest_len);
 		assert(digest_buf);
 		zonemd = zonemd_rr_create(ldns_rr_owner(the_soa), ldns_rr_ttl(the_soa));
-		zonemd_rr_pack(zonemd, soa_serial, digest_types[i], digest_buf, digest_len);
+		zonemd_rr_pack(zonemd, soa_serial, digest_types[i], parameters[i], digest_buf, digest_len);
 		free(digest_buf);
 		if (!quiet)
 			fprintf(stderr, "Add placeholder ZONEMD with digest type %u\n", digest_types[i]);
@@ -887,23 +895,24 @@ do_calculate(const char *zsk_fname)
 		errx(1, "%s(%d): No %s record found at zone apex.  Use -p to add one.", __FILE__, __LINE__, RRNAME);
 	for (i = 0; i < ldns_rr_list_rr_count(zonemd_rr_list); i++) {
 		uint8_t found_digest_type = 0;
+		uint8_t found_parameter = 0;
 		unsigned char *md_buf = 0;
 		unsigned int md_len = 0;
 		const EVP_MD *md = 0;
 		ldns_rr *zonemd_rr = ldns_rr_list_rr(zonemd_rr_list, i);
-		zonemd_rr_unpack(zonemd_rr, 0, &found_digest_type, 0, 0);
+		zonemd_rr_unpack(zonemd_rr, 0, &found_digest_type, &found_parameter, 0, 0);
 		md = zonemd_digester(found_digest_type);
 		assert(md);
 		md_len = EVP_MD_size(md);
 #if !ZONEMD_INCREMENTAL
 		md_buf = calloc(1, md_len);
 		assert(md_buf);
-		zonemd_calc_digest(0, md, md_buf, found_digest_type);
+		zonemd_calc_digest(0, md, md_buf, found_digest_type, found_parameter);
 #else
 		md_buf = theTree->digest;
-		zonemd_calc_digest(theTree, md, md_buf, found_digest_type);
+		zonemd_calc_digest(theTree, md, md_buf, found_digest_type, found_parameter);
 #endif
-		zonemd_rr_update_digest(zonemd_rr, found_digest_type, md_buf, md_len);
+		zonemd_rr_update_digest(zonemd_rr, md_buf, md_len);
 #if !ZONEMD_INCREMENTAL
 		free(md_buf);
 #endif
@@ -923,6 +932,7 @@ do_verify(void)
 		errx(1, "%s(%d): No %s record found at zone apex, cannot verify.", __FILE__, __LINE__, RRNAME);
 	for (i = 0; i < ldns_rr_list_rr_count(zonemd_rr_list); i++) {
 		uint8_t found_digest_type;
+		uint8_t found_parameter;
 		unsigned char found_digest_buf[EVP_MAX_MD_SIZE];
 		unsigned int found_digest_len = EVP_MAX_MD_SIZE;
 		uint32_t found_serial = 0;
@@ -932,7 +942,7 @@ do_verify(void)
 		unsigned char *md_buf = 0;
 		unsigned int md_len = 0;
 		ldns_rr *zonemd_rr = ldns_rr_list_rr(zonemd_rr_list, i);
-		zonemd_rr_unpack(zonemd_rr, &found_serial, &found_digest_type, found_digest_buf, &found_digest_len);
+		zonemd_rr_unpack(zonemd_rr, &found_serial, &found_digest_type, &found_parameter, found_digest_buf, &found_digest_len);
 		soa_serial_rdf = ldns_rr_rdf(the_soa, 2);
 		soa_serial = ldns_rdf2native_int32(soa_serial_rdf);
 		if (found_serial != soa_serial) {
@@ -941,27 +951,27 @@ do_verify(void)
 		}
 		md = zonemd_digester(found_digest_type);
 		if (md == 0) {
-			fprintf(stderr, "Unable to verify unsupported digest type %u\n", found_digest_type);
+			fprintf(stderr, "Unable to verify unsupported digest type %u,%u\n", found_digest_type, found_parameter);
 			continue;
 		}
 		assert(EVP_MD_size(md) <= (int) sizeof(found_digest_buf));
 		md_len = EVP_MD_size(md);
 #if ZONEMD_INCREMENTAL
 		md_buf = theTree->digest;
-		zonemd_calc_digest(theTree, md, md_buf, found_digest_type);
+		zonemd_calc_digest(theTree, md, md_buf, found_digest_type, found_parameter);
 #else
 		md_buf = calloc(1, md_len);
 		assert(md_buf);
-		zonemd_calc_digest(0, md, md_buf, found_digest_type);
+		zonemd_calc_digest(0, md, md_buf, found_digest_type, found_parameter);
 #endif
 		if (memcmp(found_digest_buf, md_buf, md_len) != 0) {
-			fprintf(stderr, "Found and calculated digests for type %u do NOT match.\n", found_digest_type);
+			fprintf(stderr, "Found and calculated digests for type %u,%u do NOT match.\n", found_digest_type, found_parameter);
 			zonemd_print_digest(stderr, "Found     : ", found_digest_buf, md_len, "\n");
 			zonemd_print_digest(stderr, "Calculated: ", md_buf, md_len, "\n");
 			rc |= 1;
 		} else {
 			if (!quiet)
-				fprintf(stderr, "Found and calculated digests for type %u do MATCH.\n", found_digest_type);
+				fprintf(stderr, "Found and calculated digests for type %u,%u do MATCH.\n", found_digest_type, found_parameter);
 		}
 #if !ZONEMD_INCREMENTAL
 		free(md_buf);
@@ -998,7 +1008,8 @@ main(int argc, char *argv[])
 	char *origin_str = 0;
 	char *zsk_fname = 0;
 	uint8_t algorithms[MAX_ZONEMD_COUNT];
-	unsigned int algorithms_cnt = 0;
+	uint8_t parameters[MAX_ZONEMD_COUNT];
+	unsigned int placeholder_cnt = 0;
 	int calculate = 0;
 	int verify = 0;
 	int print_timings = 0;
@@ -1009,6 +1020,7 @@ main(int argc, char *argv[])
 	if (0 == progname)
 		progname = argv[0];
 	memset(algorithms, 0, sizeof(algorithms));
+	memset(parameters, 0, sizeof(parameters));
 
 	while ((ch = getopt(argc, argv, "co:p:tu:vz:W:D:q")) != -1) {
 		switch (ch) {
@@ -1019,8 +1031,11 @@ main(int argc, char *argv[])
 			output_file = strdup(optarg);
 			break;
 		case 'p':
-			if (algorithms_cnt < MAX_ZONEMD_COUNT)
-				algorithms[algorithms_cnt++] = (uint8_t) strtoul(optarg, 0, 10);
+			if (placeholder_cnt < MAX_ZONEMD_COUNT) {
+				algorithms[placeholder_cnt] = (uint8_t) strtoul(optarg, 0, 10);
+				parameters[placeholder_cnt] = 5;
+				placeholder_cnt++;
+			}
 			break;
 		case 't':
 			print_timings = 1;
@@ -1077,8 +1092,8 @@ main(int argc, char *argv[])
 #endif
 	zonemd_read_zone(origin_str, input, 0, LDNS_RR_CLASS_IN);
 
-	if (algorithms_cnt)
-		zonemd_add_placeholders(algorithms, algorithms_cnt);
+	if (placeholder_cnt)
+		zonemd_add_placeholders(algorithms, parameters, placeholder_cnt);
 	my_getrusage(&t1);
 	if (calculate)
 		do_calculate(zsk_fname);
@@ -1092,7 +1107,7 @@ main(int argc, char *argv[])
 			do_calculate(zsk_fname);
 	}
 	my_getrusage(&t4);
-	if (output_file && (algorithms_cnt || calculate)) {
+	if (output_file && (placeholder_cnt || calculate)) {
 		FILE *fp = fopen(output_file, "w");
 		if (!fp)
 			err(1, "%s(%d): %s", __FILE__, __LINE__, output_file);
