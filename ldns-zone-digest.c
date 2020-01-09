@@ -925,7 +925,7 @@ do_calculate(const char *zsk_fname)
 int
 do_verify(void)
 {
-	int rc = 0;
+	int rc = 1;
 	ldns_rr_list *zonemd_rr_list = zonemd_rr_find();
 	unsigned int i;
 	if (!zonemd_rr_list)
@@ -947,7 +947,7 @@ do_verify(void)
 		soa_serial = ldns_rdf2native_int32(soa_serial_rdf);
 		if (found_serial != soa_serial) {
 			fprintf(stderr, "%s(%d): SOA serial (%u) does not match ZONEMD serial (%u)\n", __FILE__, __LINE__, soa_serial, found_serial);
-			rc |= 1;
+			continue;
 		}
 		md = zonemd_digester(found_digest_type);
 		if (md == 0) {
@@ -956,6 +956,13 @@ do_verify(void)
 		}
 		assert(EVP_MD_size(md) <= (int) sizeof(found_digest_buf));
 		md_len = EVP_MD_size(md);
+		if (found_digest_type == 1) {
+			/* SHA384-SIMPLE */
+			if (found_parameter != 0) {
+				fprintf(stderr, "Parameter value %u not supported for digest type %u\n", found_parameter, found_digest_type);
+				continue;
+			}
+		}
 #if ZONEMD_INCREMENTAL
 		md_buf = theTree->digest;
 		zonemd_calc_digest(theTree, md, md_buf, found_digest_type, found_parameter);
@@ -968,10 +975,10 @@ do_verify(void)
 			fprintf(stderr, "Found and calculated digests for type %u,%u do NOT match.\n", found_digest_type, found_parameter);
 			zonemd_print_digest(stderr, "Found     : ", found_digest_buf, md_len, "\n");
 			zonemd_print_digest(stderr, "Calculated: ", md_buf, md_len, "\n");
-			rc |= 1;
 		} else {
 			if (!quiet)
 				fprintf(stderr, "Found and calculated digests for type %u,%u do MATCH.\n", found_digest_type, found_parameter);
+			rc = 0;
 		}
 #if !ZONEMD_INCREMENTAL
 		free(md_buf);
