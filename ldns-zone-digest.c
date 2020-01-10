@@ -1098,6 +1098,8 @@ main(int argc, char *argv[])
 #endif
 #endif
 	zonemd_read_zone(origin_str, input, 0, LDNS_RR_CLASS_IN);
+        fclose(input);
+        input = 0;
 
 	if (placeholder_cnt)
 		zonemd_add_placeholders(algorithms, parameters, placeholder_cnt);
@@ -1130,6 +1132,9 @@ main(int argc, char *argv[])
 		free(output_file);
 	if (update_file)
 		free(update_file);
+#if !ZONEMD_INCREMENTAL
+        ldns_rr_list_deep_free(the_rrlist);
+#endif
 
 	if (print_timings)
 		printf("TIMINGS: load %7.2lf calculate %7.2lf verify %7.2lf update %7.2lf\n",
