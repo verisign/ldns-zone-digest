@@ -1040,7 +1040,7 @@ main(int argc, char *argv[])
 		case 'p':
 			if (placeholder_cnt < MAX_ZONEMD_COUNT) {
 				algorithms[placeholder_cnt] = (uint8_t) strtoul(optarg, 0, 10);
-				parameters[placeholder_cnt] = 5;
+				parameters[placeholder_cnt] = 0;
 				placeholder_cnt++;
 			}
 			break;
