@@ -46,6 +46,12 @@
 #include <sys/time.h>
 #include <sys/resource.h>
 
+#include "ldns-zone-digest.h"
+#include "simple.h"
+#if ZONEMD_INCREMENTAL
+#include "merkle.h"
+#endif
+
 int quiet = 0;
 
 static ldns_rr_type ZONEMD_RR_TYPE = 63;
@@ -53,37 +59,9 @@ static int ldns_knows_about_zonemd = 0;
 const char *RRNAME = "ZONEMD";
 static ldns_rdf *origin = 0;
 ldns_rr *the_soa = 0;
+zonemd *the_zonemd = 0;
 
 #define MAX_ZONEMD_COUNT 10
-
-#if !ZONEMD_INCREMENTAL
-ldns_rr_list *the_rrlist = 0;
-#endif
-
-#if ZONEMD_INCREMENTAL
-typedef struct _zonemd_tree {
-	unsigned int depth;
-	unsigned int branch;    // only for debugging?
-	ldns_rr_list *rrlist;
-	struct _zonemd_tree *parent;
-	struct _zonemd_tree **kids;
-	unsigned char digest[EVP_MAX_MD_SIZE];
-	bool dirty;
-} zonemd_tree;
-
-zonemd_tree *theTree = 0;
-unsigned int zonemd_tree_max_depth = 0;
-unsigned int zonemd_tree_max_width = 13;
-#if ZONEMD_SAVE_LEAF_COUNTS
-FILE *save_leaf_counts = 0;
-#endif
-#endif
-
-#if DEBUG
-#define fdebugf(...) fprintf(__VA_ARGS__)
-#else
-#define fdebugf(...) (void)0
-#endif
 
 unsigned int
 uimin(unsigned int a, unsigned int b)
@@ -110,117 +88,6 @@ zonemd_print_digest(FILE *fp, const char *preamble, const unsigned char *buf, un
 	if (postamble)
 		fputs(postamble, fp);
 }
-
-#if ZONEMD_INCREMENTAL
-
-/*
- * zonemd_tree_branch_by_name()
- *
- * Return branch index for a given name and depth
- */
-unsigned int
-zonemd_tree_branch_by_name(unsigned int depth, const char *name)
-{
-	unsigned int len;
-	unsigned int pos;
-	unsigned int branch;
-	len = strlen(name);
-	if (len == 0)
-		return 0;
-	pos = depth % len;
-	branch = *(name+pos) % zonemd_tree_max_width;
-	fdebugf(stderr, "%s(%d): zonemd_tree_branch_by_name '%s' depth %u pos %u branch %u\n", __FILE__, __LINE__, name, depth, pos, branch);
-	return branch;
-}
-
-/*
- * zonemd_tree_get_leaf_by_name()
- *
- * Return the leaf node corresponding to the given name
- */
-zonemd_tree *
-zonemd_tree_get_leaf_by_name(zonemd_tree *node, const char *name)
-{
-	node->dirty = true;
-	if (zonemd_tree_max_depth > node->depth) {
-		unsigned int branch = zonemd_tree_branch_by_name(node->depth, name);
-		if (node->kids == 0) {
-			node->kids = calloc(zonemd_tree_max_width, sizeof(*node->kids));
-			assert(node->kids);
-		}
-		if (node->kids[branch] == 0) {
-			node->kids[branch] = calloc(1, sizeof(**node->kids));
-			assert(node->kids[branch]);
-			node->kids[branch]->depth = node->depth+1;
-			node->kids[branch]->branch = branch;
-			node->kids[branch]->parent = node;
-		}
-		return zonemd_tree_get_leaf_by_name(node->kids[branch], name);
-	}
-	fdebugf(stderr, "%s(%d): zonemd_tree_get_leaf depth %u branch %u\n", __FILE__, __LINE__, node->depth, node->branch);
-	return node;
-}
-
-/*
- * zonemd_tree_get_leaf_by_owner()
- *
- * Wrapper around zonemd_tree_get_leaf_by_name() that takes an ldns_rdf *owner argument
- */
-zonemd_tree *
-zonemd_tree_get_leaf_by_owner(zonemd_tree *node, const ldns_rdf *owner)
-{
-	zonemd_tree *leaf;
-	char *name = ldns_rdf2str(owner);
-	assert(name);
-	leaf = zonemd_tree_get_leaf_by_name(node, name);
-	assert(leaf->kids == 0);	/* leaf nodes don't have kids */
-	free(name);
-	return leaf;
-}
-
-/*
- * zonemd_tree_add_rr()
- *
- * Add an RR to the tree.
- */
-bool
-zonemd_tree_add_rr(zonemd_tree *root, ldns_rr *rr)
-{
-	zonemd_tree *node = zonemd_tree_get_leaf_by_owner(root, ldns_rr_owner(rr));
-	if (node->rrlist == 0) {
-		node->rrlist = ldns_rr_list_new();
-		assert(node->rrlist);
-	}
-	fdebugf(stderr, "%s(%d): zonemd_tree_add_rr depth %u branch %u\n", __FILE__, __LINE__, node->depth, node->branch);
-	return ldns_rr_list_push_rr(node->rrlist, rr);
-}
-
-/*
- * zonemd_tree_full_rrlist()
- *
- * Walk all branches of the tree and buld a full rrlist.  The rrlist is
- * allocated by the caller.
- */
-void
-zonemd_tree_full_rrlist(zonemd_tree *node, ldns_rr_list *rrlist)
-{
-	if (node == 0)
-		return;
-	if (zonemd_tree_max_depth > node->depth && node->kids) {
-		unsigned int branch;
-		for (branch = 0; branch < zonemd_tree_max_width; branch++)
-			zonemd_tree_full_rrlist(node->kids[branch], rrlist);
-		return;
-	}
-	ldns_rr_list_push_rr_list(rrlist, node->rrlist);
-#if ZONEMD_SAVE_LEAF_COUNTS
-	if (save_leaf_counts) {
-		fprintf(save_leaf_counts, "%zd\n", ldns_rr_list_rr_count(node->rrlist));
-	}
-#endif
-}
-
-#endif
 
 /*
  * zonemd_rr_create()
@@ -291,15 +158,14 @@ ldns_rr_list *
 zonemd_rr_find(void)
 {
 	ldns_rr_list *ret = 0;
-	ldns_rr_list *rrlist;
+	const ldns_rr_list *rrlist;
 	unsigned int i;
 	ret = ldns_rr_list_new();
 	assert(ret);
 #if !ZONEMD_INCREMENTAL
-	rrlist = the_rrlist;
+	rrlist = zonemd_simple_get_rr_list(the_zonemd, the_soa);
 #else
-	zonemd_tree *node = zonemd_tree_get_leaf_by_owner(theTree, origin);
-	rrlist = node->rrlist;
+	rrlist = zonemd_merkle_get_rr_list(the_zonemd, the_soa);
 #endif
 	for (i = 0; i < ldns_rr_list_rr_count(rrlist); i++) {
 		ldns_rr *rr = 0;
@@ -416,11 +282,14 @@ my_typecovered(ldns_rr *rrsig)
 void
 zonemd_add_rr(ldns_rr *rr)
 {
+	ldns_rr_list *rrlist;
 #if !ZONEMD_INCREMENTAL
-		ldns_rr_list_push_rr(the_rrlist, rr);
+	rrlist = zonemd_simple_get_rr_list(the_zonemd, rr);
 #else
-		zonemd_tree_add_rr(theTree, rr);
+	rrlist = zonemd_merkle_get_rr_list(the_zonemd, rr);
 #endif
+	assert(rrlist);
+	ldns_rr_list_push_rr(rrlist, rr);
 }
 
 /*
@@ -433,36 +302,40 @@ void
 zonemd_remove_rr(ldns_rr_type type, ldns_rr_type covered)
 {
 	unsigned int i;
-	ldns_rr_list **oldp = 0;
-	ldns_rr_list *new = 0;
+	ldns_rr_list *rrlist = 0;
 	ldns_rr_list *tbd = 0;
 
-#if !ZONEMD_INCREMENTAL
-	oldp = &the_rrlist;
-#else
-	zonemd_tree *node = zonemd_tree_get_leaf_by_owner(theTree, origin);
-	oldp = &node->rrlist;
-#endif
-
-	new = ldns_rr_list_new();
 	tbd = ldns_rr_list_new();
-	assert(new);
 	assert(tbd);
 
-	for (i = 0; i < ldns_rr_list_rr_count(*oldp); i++) {
-		ldns_rr *rr = ldns_rr_list_rr(*oldp, i);
+#if !ZONEMD_INCREMENTAL
+	rrlist = zonemd_simple_get_rr_list(the_zonemd, the_soa);
+#else
+	rrlist = zonemd_merkle_get_rr_list(the_zonemd, the_soa);
+#endif
+	for (i = 0; i < ldns_rr_list_rr_count(rrlist); i++) {
+		ldns_rr *rr = ldns_rr_list_rr(rrlist, i);
 		if (ldns_dname_compare(ldns_rr_owner(rr), origin) != 0) {
-			ldns_rr_list_push_rr(new, rr);
+			(void) 0;
 		} else if (ldns_rr_get_type(rr) != type) {
-			ldns_rr_list_push_rr(new, rr);
+			(void) 0;
 		} else if (type == LDNS_RR_TYPE_RRSIG && my_typecovered(rr) != covered) {
-			ldns_rr_list_push_rr(new, rr);
+			(void) 0;
 		} else {
+			/*
+			 * swap the last RR in the list with the current RR to be removed
+			 */
+			ldns_rr *last = ldns_rr_list_pop_rr(rrlist);
+			assert(last);
 			ldns_rr_list_push_rr(tbd, rr);
+			if (last != rr) {
+				ldns_rr *t = ldns_rr_list_set_rr(rrlist, last, i);
+				assert(t == rr);
+				i--;
+			}
 		}
 	}
-	ldns_rr_list_free(*oldp);
-	*oldp = new;
+
 	ldns_rr_list_deep_free(tbd);
 }
 
@@ -546,7 +419,7 @@ zonemd_rrlist_digest(ldns_rr_list *rrlist, EVP_MD_CTX *ctx)
 		}
 #if DEBUG
 		char *s = ldns_rr2str(rr);
-		fdebugf(stderr, "%s(%d): zonemd_rrlist_digest RR#%u: %s\n", __FILE__, __LINE__, i, s);
+		fdebugf(stderr, "%s(%d): zonemd_rrlist_digest RR#%u: %s", __FILE__, __LINE__, i, s);
 		free(s);
 #endif
 		status = ldns_rr2wire(&wire_buf, rr, LDNS_SECTION_ANSWER, &sz);
@@ -558,56 +431,6 @@ zonemd_rrlist_digest(ldns_rr_list *rrlist, EVP_MD_CTX *ctx)
 		if (rr_copy != 0)
 			ldns_rr_free(rr_copy);
 	}
-}
-
-/*
- * zonemd_calc_digest()
- *
- * Calculate a digest over the zone.
- */
-void
-zonemd_calc_digest(void *arg, const EVP_MD *md, unsigned char *buf, uint8_t digest_type, uint8_t parameter)
-{
-	EVP_MD_CTX *ctx;
-#if !ZONEMD_INCREMENTAL
-	(void)(arg); /* skip warning: unused parameter 'arg' */
-	if (!quiet)
-		fprintf(stderr, "Calculating Digest for type %u,%u\n", digest_type, parameter);
-#else
-	zonemd_tree *node = arg;
-	fdebugf(stderr, "%s(%d): zonemd_calc_digest depth %u branch %u\n", __FILE__, __LINE__, node->depth, node->branch);
-	if (!node->dirty)
-		return;
-#endif
-	ctx = EVP_MD_CTX_create();
-	assert(ctx);
-	if (!EVP_DigestInit(ctx, md))
-		errx(1, "%s(%d): Digest init failed", __FILE__, __LINE__);
-#if !ZONEMD_INCREMENTAL
-	zonemd_rrlist_digest(the_rrlist, ctx);
-#else
-	if (zonemd_tree_max_depth > node->depth) {
-		unsigned int branch;
-		assert(node->kids);
-		for (branch = 0; branch < zonemd_tree_max_width; branch++) {
-			if (node->kids[branch] == 0)
-				continue;
-			zonemd_calc_digest(node->kids[branch], md, (unsigned char *) node->digest, digest_type, parameter);
-			if (!EVP_DigestUpdate(ctx, node->digest, EVP_MD_size(md)))
-				errx(1, "%s(%d): Digest update failed", __FILE__, __LINE__);
-		}
-	} else {
-		assert(node->rrlist);
-		ldns_rr_list_sort(node->rrlist);
-		zonemd_rrlist_digest(node->rrlist, ctx);
-	}
-#endif
-	if (!EVP_DigestFinal_ex(ctx, buf, 0))
-		errx(1, "%s(%d): Digest final failed", __FILE__, __LINE__);
-	EVP_MD_CTX_destroy(ctx);
-#if ZONEMD_INCREMENTAL
-	node->dirty = false;
-#endif
 }
 
 /*
@@ -660,13 +483,12 @@ zonemd_write_zone(FILE * fp)
 	unsigned int i;
 
 #if !ZONEMD_INCREMENTAL
-	rrlist = the_rrlist;
+	rrlist = zonemd_simple_get_full_rr_list(the_zonemd);
 #else
-	rrlist = ldns_rr_list_new();
-	zonemd_tree_full_rrlist(theTree, rrlist);
+	rrlist = zonemd_merkle_get_full_rr_list(the_zonemd);
 #endif
-
 	assert(rrlist);
+
 	ldns_rr_list_sort(rrlist);
 	for (i = 0; i < ldns_rr_list_rr_count(rrlist); i++) {
 		ldns_rr *rr = ldns_rr_list_rr(rrlist, i);
@@ -904,18 +726,15 @@ do_calculate(const char *zsk_fname)
 		md = zonemd_digester(found_digest_type);
 		assert(md);
 		md_len = EVP_MD_size(md);
-#if !ZONEMD_INCREMENTAL
 		md_buf = calloc(1, md_len);
 		assert(md_buf);
-		zonemd_calc_digest(0, md, md_buf, found_digest_type, found_parameter);
+#if !ZONEMD_INCREMENTAL
+		zonemd_simple_calc_digest(the_zonemd, md_buf);
 #else
-		md_buf = theTree->digest;
-		zonemd_calc_digest(theTree, md, md_buf, found_digest_type, found_parameter);
+		zonemd_merkle_calc_digest(the_zonemd, md_buf);
 #endif
 		zonemd_rr_update_digest(zonemd_rr, md_buf, md_len);
-#if !ZONEMD_INCREMENTAL
 		free(md_buf);
-#endif
 	}
 	if (zsk_fname)
 		zonemd_resign(zonemd_rr_list, zsk_fname);
@@ -963,13 +782,12 @@ do_verify(void)
 				continue;
 			}
 		}
-#if ZONEMD_INCREMENTAL
-		md_buf = theTree->digest;
-		zonemd_calc_digest(theTree, md, md_buf, found_digest_type, found_parameter);
-#else
 		md_buf = calloc(1, md_len);
 		assert(md_buf);
-		zonemd_calc_digest(0, md, md_buf, found_digest_type, found_parameter);
+#if !ZONEMD_INCREMENTAL
+		zonemd_simple_calc_digest(the_zonemd, md_buf);
+#else
+		zonemd_merkle_calc_digest(the_zonemd, md_buf);
 #endif
 		if (memcmp(found_digest_buf, md_buf, md_len) != 0) {
 			fprintf(stderr, "Found and calculated digests for type %u,%u do NOT match.\n", found_digest_type, found_parameter);
@@ -980,9 +798,7 @@ do_verify(void)
 				fprintf(stderr, "Found and calculated digests for type %u,%u do MATCH.\n", found_digest_type, found_parameter);
 			rc = 0;
 		}
-#if !ZONEMD_INCREMENTAL
 		free(md_buf);
-#endif
 	}
 	ldns_rr_list_free(zonemd_rr_list);
 	return rc;
@@ -1039,8 +855,11 @@ main(int argc, char *argv[])
 			break;
 		case 'p':
 			if (placeholder_cnt < MAX_ZONEMD_COUNT) {
-				algorithms[placeholder_cnt] = (uint8_t) strtoul(optarg, 0, 10);
-				parameters[placeholder_cnt] = 0;
+				char *p;
+				p = strtok(optarg, ",");
+				algorithms[placeholder_cnt] = (uint8_t) strtoul(p, 0, 10);
+				p = strtok(0, "");
+				parameters[placeholder_cnt] = (uint8_t) strtoul(p, 0, 10);
 				placeholder_cnt++;
 			}
 			break;
@@ -1056,14 +875,6 @@ main(int argc, char *argv[])
 		case 'z':
 			zsk_fname = strdup(optarg);
 			break;
-#if ZONEMD_INCREMENTAL
-		case 'D':
-			zonemd_tree_max_depth = strtoul(optarg, 0, 10);
-			break;
-		case 'W':
-			zonemd_tree_max_width = strtoul(optarg, 0, 10);
-			break;
-#endif
 		case 'q':
 			quiet = 1;
 			break;
@@ -1089,13 +900,9 @@ main(int argc, char *argv[])
 
 
 #if !ZONEMD_INCREMENTAL
-	the_rrlist = ldns_rr_list_new();
+	the_zonemd = zonemd_simple_new(1, 0);
 #else
-	theTree = calloc(1, sizeof(*theTree));
-	assert(theTree);
-#if ZONEMD_SAVE_LEAF_COUNTS
-	save_leaf_counts = fopen("leaf-counts.dat", "w");
-#endif
+	the_zonemd = zonemd_merkle_new(2, 5);
 #endif
 	zonemd_read_zone(origin_str, input, 0, LDNS_RR_CLASS_IN);
         fclose(input);
@@ -1133,7 +940,9 @@ main(int argc, char *argv[])
 	if (update_file)
 		free(update_file);
 #if !ZONEMD_INCREMENTAL
-        ldns_rr_list_deep_free(the_rrlist);
+        zonemd_simple_free(the_zonemd);
+#else
+        zonemd_merkle_free(the_zonemd);
 #endif
 
 	if (print_timings)

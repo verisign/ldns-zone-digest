@@ -1,24 +1,27 @@
 PROG=ldns-zone-digest
 
 
-CPPFLAGS=-Wall
+OBJS=simple.o merkle.o
+CPPFLAGS='-Wall -g'
 LDFLAGS=-lldns -lcrypto
+
 
 all: ${PROG} ${PROG}-incremental
 
-${PROG}: ${PROG}.o
-	${CC} -g -o $@ ${PROG}.o ${LDFLAGS}
+${PROG}: ${PROG}.o ${OBJS}
+	${CC} -g -o $@ ${PROG}.o ${OBJS} ${LDFLAGS}
 
 ${PROG}.o: ${PROG}.c
-	${CC} -DZONEMD_INCREMENTAL=0 -g -c -o $@ ${PROG}.c ${CPPFLAGS}
+	${CC} ${CPPFLAGS} -DZONEMD_INCREMENTAL=0 -c -o $@ ${PROG}.c
 
-${PROG}-incremental: ${PROG}-incremental.o
-	${CC} -g -o $@ ${PROG}-incremental.o ${LDFLAGS}
+${PROG}-incremental: ${PROG}-incremental.o ${OBJS}
+	${CC} -g -o $@ ${PROG}-incremental.o ${OBJS} ${LDFLAGS}
 
 ${PROG}-incremental.o: ${PROG}.c
-	${CC} -DZONEMD_INCREMENTAL=1 -g -c -o $@ ${PROG}.c ${CPPFLAGS}
+	${CC} ${CPPFLAGS} -DZONEMD_INCREMENTAL=1 -c -o $@ ${PROG}.c
 
 clean:
+	rm -fv ${OBJS}
 	rm -fv ${PROG}.o
 	rm -fv ${PROG}
 	rm -fv ${PROG}-incremental.o
