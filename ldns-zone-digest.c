@@ -48,9 +48,7 @@
 
 #include "ldns-zone-digest.h"
 #include "simple.h"
-#if ZONEMD_INCREMENTAL
 #include "merkle.h"
-#endif
 
 int quiet = 0;
 
@@ -163,11 +161,17 @@ zonemd_rr_find(void)
 	unsigned int i;
 	ret = ldns_rr_list_new();
 	assert(ret);
-#if !ZONEMD_INCREMENTAL
-	rrlist = zonemd_simple_get_rr_list(the_zonemd, the_soa);
-#else
-	rrlist = zonemd_merkle_get_rr_list(the_zonemd, the_soa);
-#endif
+	switch (the_zonemd->scheme) {
+	case 1:
+		rrlist = zonemd_simple_get_rr_list(the_zonemd, the_soa);
+		break;
+	case 240:
+		rrlist = zonemd_merkle_get_rr_list(the_zonemd, the_soa);
+		break;
+	default:
+		errx(1, "%s(%d): bug", __FILE__, __LINE__);
+		break;
+	}
 	for (i = 0; i < ldns_rr_list_rr_count(rrlist); i++) {
 		ldns_rr *rr = 0;
 		rr = ldns_rr_list_rr(rrlist, i);
@@ -284,11 +288,17 @@ void
 zonemd_add_rr(ldns_rr *rr)
 {
 	ldns_rr_list *rrlist;
-#if !ZONEMD_INCREMENTAL
-	rrlist = zonemd_simple_get_rr_list(the_zonemd, rr);
-#else
-	rrlist = zonemd_merkle_get_rr_list(the_zonemd, rr);
-#endif
+	switch (the_zonemd->scheme) {
+	case 1:
+		rrlist = zonemd_simple_get_rr_list(the_zonemd, rr);
+		break;
+	case 240:
+		rrlist = zonemd_merkle_get_rr_list(the_zonemd, rr);
+		break;
+	default:
+		errx(1, "%s(%d): bug", __FILE__, __LINE__);
+		break;
+	}
 	assert(rrlist);
 	ldns_rr_list_push_rr(rrlist, rr);
 }
@@ -309,11 +319,17 @@ zonemd_remove_rr(ldns_rr_type type, ldns_rr_type covered)
 	tbd = ldns_rr_list_new();
 	assert(tbd);
 
-#if !ZONEMD_INCREMENTAL
-	rrlist = zonemd_simple_get_rr_list(the_zonemd, the_soa);
-#else
-	rrlist = zonemd_merkle_get_rr_list(the_zonemd, the_soa);
-#endif
+	switch (the_zonemd->scheme) {
+	case 1:
+		rrlist = zonemd_simple_get_rr_list(the_zonemd, the_soa);
+		break;
+	case 240:
+		rrlist = zonemd_merkle_get_rr_list(the_zonemd, the_soa);
+		break;
+	default:
+		errx(1, "%s(%d): bug", __FILE__, __LINE__);
+		break;
+	}
 	for (i = 0; i < ldns_rr_list_rr_count(rrlist); i++) {
 		ldns_rr *rr = ldns_rr_list_rr(rrlist, i);
 		if (ldns_dname_compare(ldns_rr_owner(rr), origin) != 0) {
@@ -483,11 +499,17 @@ zonemd_write_zone(FILE * fp)
 	ldns_rr_list *rrlist = 0;
 	unsigned int i;
 
-#if !ZONEMD_INCREMENTAL
-	rrlist = zonemd_simple_get_full_rr_list(the_zonemd);
-#else
-	rrlist = zonemd_merkle_get_full_rr_list(the_zonemd);
-#endif
+	switch (the_zonemd->scheme) {
+	case 1:
+		rrlist = zonemd_simple_get_full_rr_list(the_zonemd);
+		break;
+	case 240:
+		rrlist = zonemd_merkle_get_full_rr_list(the_zonemd);
+		break;
+	default:
+		errx(1, "%s(%d): bug", __FILE__, __LINE__);
+		break;
+	}
 	assert(rrlist);
 
 	ldns_rr_list_sort(rrlist);
@@ -496,9 +518,8 @@ zonemd_write_zone(FILE * fp)
 		if (rr)
 			ldns_rr_print(fp, rr);
 	}
-#if ZONEMD_INCREMENTAL
-	ldns_rr_list_free(rrlist);
-#endif
+	if (240 == the_zonemd->scheme)	/* XXX */
+		ldns_rr_list_free(rrlist);
 }
 
 void
@@ -511,10 +532,6 @@ usage(const char *p)
 	fprintf(stderr, "\t-p s,h\t\tinsert placeholder record of scheme s and hashalg h\n");
 	fprintf(stderr, "\t-v\t\tverify the zone digest\n");
 	fprintf(stderr, "\t-z\t\tZSK file name\n");
-#if ZONEMD_INCREMENTAL
-	fprintf(stderr, "\t-D\t\tDepth of hash tree\n");
-	fprintf(stderr, "\t-W\t\tWidth of hash tree\n");
-#endif
 	fprintf(stderr, "\t-q\t\tquiet mode, show errors only\n");
 	exit(2);
 }
@@ -713,6 +730,31 @@ zonemd_zone_update(const char *update_file)
 		fprintf(stderr, "%u additions, %u deletions\n", n_add, n_del);
 }
 
+zonemd *
+supported_scheme(uint8_t scheme, const char *file, const int line, bool is_fatal)
+{
+	const char *msg = "bug";
+	switch(scheme) {
+	case 0:
+		msg = "%s(%d): Scheme %u is RESERVED and must not be used";
+		break;
+	case 1:
+	case 240:
+		if (the_zonemd->scheme == scheme)
+			return the_zonemd;
+		msg = "%s(%d): No in-memory data for scheme %u";
+		break;
+	default:
+		msg = "%s(%d): Unsupported scheme %u";
+		break;
+	}
+	if (is_fatal)
+		errx(1, msg, file, line, scheme);
+	else
+		warnx(msg, file, line, scheme);
+	return 0;
+}
+
 void
 do_calculate(const char *zsk_fname)
 {
@@ -723,21 +765,31 @@ do_calculate(const char *zsk_fname)
 	for (i = 0; i < ldns_rr_list_rr_count(zonemd_rr_list); i++) {
 		uint8_t found_scheme = 0;
 		uint8_t found_hashalg = 0;
+		zonemd *a_zonemd = 0;
 		unsigned char *md_buf = 0;
 		unsigned int md_len = 0;
 		const EVP_MD *md = 0;
 		ldns_rr *zonemd_rr = ldns_rr_list_rr(zonemd_rr_list, i);
 		zonemd_rr_unpack(zonemd_rr, 0, &found_scheme, &found_hashalg, 0, 0);
+		a_zonemd = supported_scheme(found_scheme, __FILE__, __LINE__, 1);
+		if (0 == a_zonemd)
+			continue;
 		md = zonemd_digester(found_hashalg);
 		assert(md);
 		md_len = EVP_MD_size(md);
 		md_buf = calloc(1, md_len);
 		assert(md_buf);
-#if !ZONEMD_INCREMENTAL
-		zonemd_simple_calc_digest(the_zonemd, md, md_buf);
-#else
-		zonemd_merkle_calc_digest(the_zonemd, md, md_buf);
-#endif
+		switch (a_zonemd->scheme) {
+		case 1:
+			zonemd_simple_calc_digest(the_zonemd, md, md_buf);
+			break;
+		case 240:
+			zonemd_merkle_calc_digest(the_zonemd, md, md_buf);
+			break;
+		default:
+			errx(1, "%s(%d): bug", __FILE__, __LINE__);
+			break;
+		}
 		zonemd_rr_update_digest(zonemd_rr, md_buf, md_len);
 		free(md_buf);
 	}
@@ -757,6 +809,7 @@ do_verify(void)
 	for (i = 0; i < ldns_rr_list_rr_count(zonemd_rr_list); i++) {
 		uint8_t found_scheme;
 		uint8_t found_hashalg;
+		zonemd *a_zonemd = 0;
 		unsigned char found_digest_buf[EVP_MAX_MD_SIZE];
 		unsigned int found_digest_len = EVP_MAX_MD_SIZE;
 		uint32_t found_serial = 0;
@@ -773,6 +826,9 @@ do_verify(void)
 			fprintf(stderr, "%s(%d): SOA serial (%u) does not match ZONEMD serial (%u)\n", __FILE__, __LINE__, soa_serial, found_serial);
 			continue;
 		}
+		a_zonemd = supported_scheme(found_scheme, __FILE__, __LINE__, 0);
+		if (0 == a_zonemd)
+			continue;
 		md = zonemd_digester(found_hashalg);
 		if (md == 0) {
 			fprintf(stderr, "Unable to verify unsupported hash algorithm %u\n", found_hashalg);
@@ -782,11 +838,17 @@ do_verify(void)
 		md_len = EVP_MD_size(md);
 		md_buf = calloc(1, md_len);
 		assert(md_buf);
-#if !ZONEMD_INCREMENTAL
-		zonemd_simple_calc_digest(the_zonemd, md, md_buf);
-#else
-		zonemd_merkle_calc_digest(the_zonemd, md, md_buf);
-#endif
+		switch (found_scheme) {
+		case 1:
+			zonemd_simple_calc_digest(the_zonemd, md, md_buf);
+			break;
+		case 240:
+			zonemd_merkle_calc_digest(the_zonemd, md, md_buf);
+			break;
+		default:
+			errx(1, "%s(%d): bug", __FILE__, __LINE__);
+			break;
+		}
 		if (memcmp(found_digest_buf, md_buf, md_len) != 0) {
 			fprintf(stderr, "Found and calculated digests for scheme:hashalg %u:%u do NOT match.\n", found_scheme, found_hashalg);
 			zonemd_print_digest(stderr, "Found     : ", found_digest_buf, md_len, "\n");
@@ -828,6 +890,7 @@ main(int argc, char *argv[])
 	char *update_file = 0;
 	char *origin_str = 0;
 	char *zsk_fname = 0;
+	uint8_t the_scheme = 1;
         zonemd placeholders[MAX_ZONEMD_COUNT];
 	unsigned int placeholder_cnt = 0;
 	int calculate = 0;
@@ -841,7 +904,7 @@ main(int argc, char *argv[])
 		progname = argv[0];
 	memset(placeholders, 0, sizeof(placeholders));
 
-	while ((ch = getopt(argc, argv, "co:p:tu:vz:W:D:q")) != -1) {
+	while ((ch = getopt(argc, argv, "co:p:qs:tu:vz:")) != -1) {
 		switch (ch) {
 		case 'c':
 			calculate = 1;
@@ -867,6 +930,12 @@ main(int argc, char *argv[])
 				placeholder_cnt++;
 			}
 			break;
+		case 'q':
+			quiet = 1;
+			break;
+		case 's':
+			the_scheme = (uint8_t) strtoul(optarg, 0, 10);
+			break;
 		case 't':
 			print_timings = 1;
 			break;
@@ -878,9 +947,6 @@ main(int argc, char *argv[])
 			break;
 		case 'z':
 			zsk_fname = strdup(optarg);
-			break;
-		case 'q':
-			quiet = 1;
 			break;
 		default:
 			usage(progname);
@@ -903,11 +969,17 @@ main(int argc, char *argv[])
 
 
 
-#if !ZONEMD_INCREMENTAL
-	the_zonemd = zonemd_simple_new(1);
-#else
-	the_zonemd = zonemd_merkle_new(240);
-#endif
+	switch (the_scheme) {
+	case 1:
+		the_zonemd = zonemd_simple_new(the_scheme);
+		break;
+	case 240:
+		the_zonemd = zonemd_merkle_new(the_scheme);
+		break;
+	default:
+		errx(1, "%s(%d): Unsupported scheme %u", __FILE__, __LINE__, the_zonemd->scheme);
+		break;
+	}
 	zonemd_read_zone(origin_str, input, 0, LDNS_RR_CLASS_IN);
         fclose(input);
         input = 0;
@@ -943,11 +1015,17 @@ main(int argc, char *argv[])
 		free(output_file);
 	if (update_file)
 		free(update_file);
-#if !ZONEMD_INCREMENTAL
-        zonemd_simple_free(the_zonemd);
-#else
-        zonemd_merkle_free(the_zonemd);
-#endif
+	switch (the_zonemd->scheme) {
+	case 1:
+		zonemd_simple_free(the_zonemd);
+		break;
+	case 240:
+		zonemd_merkle_free(the_zonemd);
+		break;
+	default:
+		errx(1, "%s(%d): Unsupported scheme %u", __FILE__, __LINE__, the_zonemd->scheme);
+		break;
+	}
 
 	if (print_timings)
 		printf("TIMINGS: load %7.2lf calculate %7.2lf verify %7.2lf update %7.2lf\n",

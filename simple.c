@@ -11,7 +11,7 @@ zonemd *
 zonemd_simple_new(uint8_t scheme)
 {
 	zonemd *zmd;
-
+	assert(1 == scheme);
 	zmd = calloc(1, sizeof(*zmd));
 	assert(zmd);
 	zmd->scheme = scheme;

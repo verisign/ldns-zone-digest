@@ -137,6 +137,7 @@ zonemd *
 zonemd_merkle_new(uint8_t scheme)
 {
         zonemd *zmd;
+        assert (240 == scheme);
 	fdebugf(stderr, "Creating Merkle Tree of scheme %u\n", scheme);
 
         zmd = calloc(1, sizeof(*zmd));
