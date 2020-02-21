@@ -1,10 +1,5 @@
-
-zonemd * zonemd_merkle_new(uint8_t scheme);
-
-ldns_rr_list *zonemd_merkle_get_rr_list(const zonemd *zmd, const ldns_rr * rr);
-
-ldns_rr_list *zonemd_merkle_get_full_rr_list(const zonemd *zmd);
-
-void zonemd_merkle_calc_digest(const zonemd *zmd, const EVP_MD * md, unsigned char *buf);
-
-void zonemd_merkle_free(zonemd *zmd);
+scheme_new scheme_merkle_new;
+scheme_get_leaf_rr_list scheme_merkle_get_leaf_rr_list;
+scheme_calc_digest scheme_merkle_calc_digest;
+scheme_iterate scheme_merkle_iterate;
+scheme_free scheme_merkle_free;

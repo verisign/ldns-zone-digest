@@ -6,16 +6,16 @@
 #include "ldns-zone-digest.h"
 #include "merkle.h"
 
-typedef struct _zonemd_tree
+typedef struct _merkle_tree
 {
 	unsigned int depth;
 	char branch_str[128];
 	ldns_rr_list *rrlist;
-	struct _zonemd_tree *parent;	// not used currently
-	struct _zonemd_tree **kids;
+	struct _merkle_tree *parent;	// not used currently
+	struct _merkle_tree **kids;
 	unsigned char digest[EVP_MAX_MD_SIZE];
 	bool dirty;
-} zonemd_tree;
+} merkle_tree;
 
 unsigned int merkle_tree_max_width = 13;
 unsigned int merkle_tree_max_depth = 7;
@@ -30,12 +30,12 @@ FILE *save_leaf_counts = 0;
 /* ============================================================================== */
 
 /*
- * zonemd_tree_branch_by_name()
+ * merkle_tree_branch_by_name()
  *
  * Return branch index for a given name and depth
  */
 static unsigned int
-zonemd_tree_branch_by_name(unsigned int depth, const char *name)
+merkle_tree_branch_by_name(unsigned int depth, const char *name)
 {
 	unsigned int len;
 	unsigned int pos;
@@ -45,22 +45,22 @@ zonemd_tree_branch_by_name(unsigned int depth, const char *name)
 		return 0;
 	pos = depth % len;
 	branch = *(name + pos) % merkle_tree_max_width;
-	//fdebugf(stderr, "%s(%d): zonemd_tree_branch_by_name '%s' depth %u pos %u branch %u\n", __FILE__, __LINE__, name,
+	//fdebugf(stderr, "%s(%d): merkle_tree_branch_by_name '%s' depth %u pos %u branch %u\n", __FILE__, __LINE__, name,
 	//	depth, pos, branch);
 	return branch;
 }
 
 /*
- * zonemd_tree_get_leaf_by_name()
+ * merkle_tree_get_leaf_by_name()
  *
  * Return the leaf node corresponding to the given name
  */
-static zonemd_tree *
-zonemd_tree_get_leaf_by_name_sub(const zonemd *zmd, zonemd_tree * node, const char *name)
+static merkle_tree *
+merkle_tree_get_leaf_by_name_sub(const scheme *s, merkle_tree * node, const char *name)
 {
 	node->dirty = true;
 	if (merkle_tree_max_depth > node->depth) {
-		unsigned int branch = zonemd_tree_branch_by_name(node->depth, name);
+		unsigned int branch = merkle_tree_branch_by_name(node->depth, name);
 		if (node->kids == 0) {
 			node->kids = calloc(merkle_tree_max_width, sizeof(*node->kids));
 			assert(node->kids);
@@ -77,30 +77,30 @@ zonemd_tree_get_leaf_by_name_sub(const zonemd *zmd, zonemd_tree * node, const ch
 				snprintf(node->kids[branch]->branch_str, sizeof(node->kids[branch]->branch_str), "%s %u", t, branch);
 			}
 		}
-		return zonemd_tree_get_leaf_by_name_sub(zmd, node->kids[branch], name);
+		return merkle_tree_get_leaf_by_name_sub(s, node->kids[branch], name);
 	}
-	fdebugf(stderr, "%s(%d): zonemd_tree_get_leaf '%s' is at %s\n", __FILE__, __LINE__, name, node->branch_str);
+	fdebugf(stderr, "%s(%d): merkle_tree_get_leaf '%s' is at %s\n", __FILE__, __LINE__, name, node->branch_str);
 	return node;
 }
 
 /*
- * zonemd_tree_full_rrlist()
+ * iterate and callback sub
  *
- * Walk all branches of the tree and buld a full rrlist.  The rrlist is
- * allocated by the caller.
  */
 static void
-zonemd_tree_full_rrlist_sub(const zonemd *zmd, zonemd_tree * node, ldns_rr_list * rrlist)
+merkle_tree_iterate_sub(const scheme *s, merkle_tree * node, const scheme_iterate_cb cb, const void *cb_data)
 {
+	unsigned int i;
 	if (node == 0)
 		return;
 	if (merkle_tree_max_depth > node->depth && node->kids) {
 		unsigned int branch;
 		for (branch = 0; branch < merkle_tree_max_width; branch++)
-			zonemd_tree_full_rrlist_sub(zmd, node->kids[branch], rrlist);
+			merkle_tree_iterate_sub(s, node->kids[branch], cb, cb_data);
 		return;
 	}
-	ldns_rr_list_push_rr_list(rrlist, node->rrlist);
+	for (i = 0; i < ldns_rr_list_rr_count(node->rrlist); i++)
+		cb(ldns_rr_list_rr(node->rrlist, i), cb_data);
 #if ZONEMD_SAVE_LEAF_COUNTS
 	if (save_leaf_counts) {
 		fprintf(save_leaf_counts, "%zd\n", ldns_rr_list_rr_count(node->rrlist));
@@ -109,19 +109,19 @@ zonemd_tree_full_rrlist_sub(const zonemd *zmd, zonemd_tree * node, ldns_rr_list 
 }
 
 /*
- * zonemd_tree_free_sub()
+ * merkle_tree_free_sub()
  *
  * Walk all branches of the tree and free the data.
  */
 static void
-zonemd_tree_free_sub(zonemd *zmd, zonemd_tree * node)
+merkle_tree_free_sub(scheme *s, merkle_tree * node)
 {
 	if (node == 0)
 		return;
 	if (merkle_tree_max_depth > node->depth && node->kids) {
 		unsigned int branch;
 		for (branch = 0; branch < merkle_tree_max_width; branch++) {
-			zonemd_tree_free_sub(zmd, node->kids[branch]);
+			merkle_tree_free_sub(s, node->kids[branch]);
 			free(node->kids[branch]);
 		}
 		free(node->kids);
@@ -133,37 +133,40 @@ zonemd_tree_free_sub(zonemd *zmd, zonemd_tree * node)
 
 /* ============================================================================== */
 
-zonemd *
-zonemd_merkle_new(uint8_t scheme)
+scheme *
+scheme_merkle_new(uint8_t opt_scheme)
 {
-        zonemd *zmd;
-        assert (240 == scheme);
-	fdebugf(stderr, "Creating Merkle Tree of scheme %u\n", scheme);
-
-        zmd = calloc(1, sizeof(*zmd));
-        assert(zmd);
-        zmd->scheme = scheme;
-        zmd->data = calloc(1, sizeof(zonemd_tree));
-        assert(zmd->data);
+	scheme *s;
+	assert(240 == opt_scheme);
+	fdebugf(stderr, "Creating Merkle Tree of scheme %u\n", opt_scheme);
+	s = calloc(1, sizeof(*s));
+	assert(s);
+	s->scheme = opt_scheme;
+	s->leaf = scheme_merkle_get_leaf_rr_list;
+	s->calc = scheme_merkle_calc_digest;
+	s->iter = scheme_merkle_iterate;
+	s->free = scheme_merkle_free;
+	s->data = calloc(1, sizeof(merkle_tree));
+	assert(s->data);
 #if ZONEMD_SAVE_LEAF_COUNTS
 	save_leaf_counts = fopen("leaf-counts.dat", "w");
 #endif
-        return zmd;
+	return s;
 }
 
 /*
  */
 ldns_rr_list *
-zonemd_merkle_get_rr_list(const zonemd *zmd, const ldns_rr * rr)
+scheme_merkle_get_leaf_rr_list(const scheme *s, const ldns_rr * rr)
 {
 	const ldns_rdf *owner;
 	char *name;
-	zonemd_tree *leaf;
+	merkle_tree *leaf;
 	owner = ldns_rr_owner(rr);
 	assert(owner);
 	name = ldns_rdf2str(owner);
 	assert(name);
-	leaf = zonemd_tree_get_leaf_by_name_sub(zmd, zmd->data, name);
+	leaf = merkle_tree_get_leaf_by_name_sub(s, s->data, name);
 	assert(leaf);
 	assert(leaf->kids == 0);	/* leaf nodes don't have kids */
 	free(name);
@@ -174,23 +177,22 @@ zonemd_merkle_get_rr_list(const zonemd *zmd, const ldns_rr * rr)
 	return leaf->rrlist;
 }
 
-ldns_rr_list *
-zonemd_merkle_get_full_rr_list(const zonemd *zmd)
+/*
+ * Iterate over ALL RRs in the zone.
+ */
+void
+scheme_merkle_iterate(const scheme *s, const scheme_iterate_cb cb, const void *cb_data)
 {
-	ldns_rr_list *rrlist;
-	rrlist = ldns_rr_list_new();
-	assert(rrlist);
-	zonemd_tree_full_rrlist_sub(zmd, zmd->data, rrlist);
-	return rrlist;
+	merkle_tree_iterate_sub(s, s->data, cb, cb_data);
 }
 
 static void
-zonemd_merkle_calc_digest_sub(const zonemd *zmd, zonemd_tree *node, const EVP_MD * md, unsigned char *buf)
+scheme_merkle_calc_digest_sub(const scheme *s, merkle_tree *node, const EVP_MD * md, unsigned char *buf)
 {
 	EVP_MD_CTX *ctx;
-	//fdebugf(stderr, "%s(%d): zonemd_calc_digest depth %u branch %u\n", __FILE__, __LINE__, node->depth,
+	//fdebugf(stderr, "%s(%d): scheme_calc_digest depth %u branch %u\n", __FILE__, __LINE__, node->depth,
 	//	node->branch);
-	fdebugf(stderr, "%s(%d): zonemd_calc_digest at %s\n", __FILE__, __LINE__, node->branch_str);
+	fdebugf(stderr, "%s(%d): scheme_calc_digest at %s\n", __FILE__, __LINE__, node->branch_str);
 	if (!node->dirty)
 		return;
 	ctx = EVP_MD_CTX_create();
@@ -203,7 +205,7 @@ zonemd_merkle_calc_digest_sub(const zonemd *zmd, zonemd_tree *node, const EVP_MD
 		for (branch = 0; branch < merkle_tree_max_width; branch++) {
 			if (node->kids[branch] == 0)
 				continue;
-			zonemd_merkle_calc_digest_sub(zmd, node->kids[branch], md, (unsigned char *) node->digest);
+			scheme_merkle_calc_digest_sub(s, node->kids[branch], md, (unsigned char *) node->digest);
 			if (!EVP_DigestUpdate(ctx, node->digest, EVP_MD_size(md)))
 				errx(1, "%s(%d): Digest update failed", __FILE__, __LINE__);
 		}
@@ -219,18 +221,18 @@ zonemd_merkle_calc_digest_sub(const zonemd *zmd, zonemd_tree *node, const EVP_MD
 }
 
 void
-zonemd_merkle_calc_digest(const zonemd *zmd, const EVP_MD * md, unsigned char *buf)
+scheme_merkle_calc_digest(const scheme *s, const EVP_MD * md, unsigned char *buf)
 {
-	zonemd_merkle_calc_digest_sub(zmd, zmd->data, md, buf);
+	scheme_merkle_calc_digest_sub(s, s->data, md, buf);
 }
 
 void
-zonemd_merkle_free(zonemd *zmd)
+scheme_merkle_free(scheme *s)
 {
-	assert(zmd->data);
-	zonemd_tree_free_sub(zmd, zmd->data);
-	free(zmd->data);
-	free(zmd);
+	assert(s->data);
+	merkle_tree_free_sub(s, s->data);
+	free(s->data);
+	free(s);
 #if ZONEMD_SAVE_LEAF_COUNTS
 	fclose(save_leaf_counts);
 	save_leaf_counts = 0;

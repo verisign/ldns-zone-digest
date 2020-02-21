@@ -57,9 +57,13 @@ static int ldns_knows_about_zonemd = 0;
 const char *RRNAME = "ZONEMD";
 static ldns_rdf *origin = 0;
 ldns_rr *the_soa = 0;
-zonemd *the_zonemd = 0;
+scheme *the_scheme = 0;
 
 #define MAX_ZONEMD_COUNT 10
+typedef struct  {
+	uint8_t scheme;
+	uint8_t hashalg;
+} placeholder;
 
 unsigned int
 uimin(unsigned int a, unsigned int b)
@@ -161,17 +165,8 @@ zonemd_rr_find(void)
 	unsigned int i;
 	ret = ldns_rr_list_new();
 	assert(ret);
-	switch (the_zonemd->scheme) {
-	case 1:
-		rrlist = zonemd_simple_get_rr_list(the_zonemd, the_soa);
-		break;
-	case 240:
-		rrlist = zonemd_merkle_get_rr_list(the_zonemd, the_soa);
-		break;
-	default:
-		errx(1, "%s(%d): bug", __FILE__, __LINE__);
-		break;
-	}
+	rrlist = the_scheme->leaf(the_scheme, the_soa);
+	assert(rrlist);
 	for (i = 0; i < ldns_rr_list_rr_count(rrlist); i++) {
 		ldns_rr *rr = 0;
 		rr = ldns_rr_list_rr(rrlist, i);
@@ -288,17 +283,7 @@ void
 zonemd_add_rr(ldns_rr *rr)
 {
 	ldns_rr_list *rrlist;
-	switch (the_zonemd->scheme) {
-	case 1:
-		rrlist = zonemd_simple_get_rr_list(the_zonemd, rr);
-		break;
-	case 240:
-		rrlist = zonemd_merkle_get_rr_list(the_zonemd, rr);
-		break;
-	default:
-		errx(1, "%s(%d): bug", __FILE__, __LINE__);
-		break;
-	}
+	rrlist = the_scheme->leaf(the_scheme, rr);
 	assert(rrlist);
 	ldns_rr_list_push_rr(rrlist, rr);
 }
@@ -319,17 +304,8 @@ zonemd_remove_rr(ldns_rr_type type, ldns_rr_type covered)
 	tbd = ldns_rr_list_new();
 	assert(tbd);
 
-	switch (the_zonemd->scheme) {
-	case 1:
-		rrlist = zonemd_simple_get_rr_list(the_zonemd, the_soa);
-		break;
-	case 240:
-		rrlist = zonemd_merkle_get_rr_list(the_zonemd, the_soa);
-		break;
-	default:
-		errx(1, "%s(%d): bug", __FILE__, __LINE__);
-		break;
-	}
+	rrlist = the_scheme->leaf(the_scheme, the_soa);
+	assert(rrlist);
 	for (i = 0; i < ldns_rr_list_rr_count(rrlist); i++) {
 		ldns_rr *rr = ldns_rr_list_rr(rrlist, i);
 		if (ldns_dname_compare(ldns_rr_owner(rr), origin) != 0) {
@@ -488,38 +464,27 @@ zonemd_resign(ldns_rr_list * rrset, const char *zsk_fname)
 	ldns_rr_list_free(rrsig);
 }
 
+void
+zonemd_write_zone_cb(const ldns_rr *rr, const void *cb_data) 
+{
+	FILE *fp = (void *) cb_data;
+	if (rr)
+		ldns_rr_print(fp, rr);
+}
+
 /*
  * zonemd_write_zone()
  *
- * Prints all zone records to 'fp'
+ * Prints all zone records to output_file
  */
 void
-zonemd_write_zone(FILE * fp)
+zonemd_write_zone(const char *output_file)
 {
-	ldns_rr_list *rrlist = 0;
-	unsigned int i;
-
-	switch (the_zonemd->scheme) {
-	case 1:
-		rrlist = zonemd_simple_get_full_rr_list(the_zonemd);
-		break;
-	case 240:
-		rrlist = zonemd_merkle_get_full_rr_list(the_zonemd);
-		break;
-	default:
-		errx(1, "%s(%d): bug", __FILE__, __LINE__);
-		break;
-	}
-	assert(rrlist);
-
-	ldns_rr_list_sort(rrlist);
-	for (i = 0; i < ldns_rr_list_rr_count(rrlist); i++) {
-		ldns_rr *rr = ldns_rr_list_rr(rrlist, i);
-		if (rr)
-			ldns_rr_print(fp, rr);
-	}
-	if (240 == the_zonemd->scheme)	/* XXX */
-		ldns_rr_list_free(rrlist);
+	FILE *fp = fopen(output_file, "w");
+	if (!fp)
+		err(1, "%s(%d): %s", __FILE__, __LINE__, output_file);
+	the_scheme->iter(the_scheme, zonemd_write_zone_cb, fp);
+	fclose(fp);
 }
 
 void
@@ -560,7 +525,7 @@ elapsed_msec(struct timeval *a, struct timeval *b)
  * has a ZONEMD record, it is removed and discarded.
  */
 void
-zonemd_add_placeholders(zonemd placeholders[], unsigned int count)
+zonemd_add_placeholders(placeholder placeholders[], unsigned int count)
 {
 	ldns_rdf *soa_serial_rdf = 0;
 	uint32_t soa_serial;
@@ -730,7 +695,7 @@ zonemd_zone_update(const char *update_file)
 		fprintf(stderr, "%u additions, %u deletions\n", n_add, n_del);
 }
 
-zonemd *
+bool
 supported_scheme(uint8_t scheme, const char *file, const int line, bool is_fatal)
 {
 	const char *msg = "bug";
@@ -740,8 +705,8 @@ supported_scheme(uint8_t scheme, const char *file, const int line, bool is_fatal
 		break;
 	case 1:
 	case 240:
-		if (the_zonemd->scheme == scheme)
-			return the_zonemd;
+		if (the_scheme->scheme == scheme)
+			return 1;
 		msg = "%s(%d): No in-memory data for scheme %u";
 		break;
 	default:
@@ -765,31 +730,19 @@ do_calculate(const char *zsk_fname)
 	for (i = 0; i < ldns_rr_list_rr_count(zonemd_rr_list); i++) {
 		uint8_t found_scheme = 0;
 		uint8_t found_hashalg = 0;
-		zonemd *a_zonemd = 0;
 		unsigned char *md_buf = 0;
 		unsigned int md_len = 0;
 		const EVP_MD *md = 0;
 		ldns_rr *zonemd_rr = ldns_rr_list_rr(zonemd_rr_list, i);
 		zonemd_rr_unpack(zonemd_rr, 0, &found_scheme, &found_hashalg, 0, 0);
-		a_zonemd = supported_scheme(found_scheme, __FILE__, __LINE__, 1);
-		if (0 == a_zonemd)
+		if (!supported_scheme(found_scheme, __FILE__, __LINE__, 1))
 			continue;
 		md = zonemd_digester(found_hashalg);
 		assert(md);
 		md_len = EVP_MD_size(md);
 		md_buf = calloc(1, md_len);
 		assert(md_buf);
-		switch (a_zonemd->scheme) {
-		case 1:
-			zonemd_simple_calc_digest(the_zonemd, md, md_buf);
-			break;
-		case 240:
-			zonemd_merkle_calc_digest(the_zonemd, md, md_buf);
-			break;
-		default:
-			errx(1, "%s(%d): bug", __FILE__, __LINE__);
-			break;
-		}
+		the_scheme->calc(the_scheme, md, md_buf);
 		zonemd_rr_update_digest(zonemd_rr, md_buf, md_len);
 		free(md_buf);
 	}
@@ -809,7 +762,6 @@ do_verify(void)
 	for (i = 0; i < ldns_rr_list_rr_count(zonemd_rr_list); i++) {
 		uint8_t found_scheme;
 		uint8_t found_hashalg;
-		zonemd *a_zonemd = 0;
 		unsigned char found_digest_buf[EVP_MAX_MD_SIZE];
 		unsigned int found_digest_len = EVP_MAX_MD_SIZE;
 		uint32_t found_serial = 0;
@@ -826,8 +778,7 @@ do_verify(void)
 			fprintf(stderr, "%s(%d): SOA serial (%u) does not match ZONEMD serial (%u)\n", __FILE__, __LINE__, soa_serial, found_serial);
 			continue;
 		}
-		a_zonemd = supported_scheme(found_scheme, __FILE__, __LINE__, 0);
-		if (0 == a_zonemd)
+		if (!supported_scheme(found_scheme, __FILE__, __LINE__, 0))
 			continue;
 		md = zonemd_digester(found_hashalg);
 		if (md == 0) {
@@ -838,17 +789,7 @@ do_verify(void)
 		md_len = EVP_MD_size(md);
 		md_buf = calloc(1, md_len);
 		assert(md_buf);
-		switch (found_scheme) {
-		case 1:
-			zonemd_simple_calc_digest(the_zonemd, md, md_buf);
-			break;
-		case 240:
-			zonemd_merkle_calc_digest(the_zonemd, md, md_buf);
-			break;
-		default:
-			errx(1, "%s(%d): bug", __FILE__, __LINE__);
-			break;
-		}
+		the_scheme->calc(the_scheme, md, md_buf);
 		if (memcmp(found_digest_buf, md_buf, md_len) != 0) {
 			fprintf(stderr, "Found and calculated digests for scheme:hashalg %u:%u do NOT match.\n", found_scheme, found_hashalg);
 			zonemd_print_digest(stderr, "Found     : ", found_digest_buf, md_len, "\n");
@@ -890,8 +831,8 @@ main(int argc, char *argv[])
 	char *update_file = 0;
 	char *origin_str = 0;
 	char *zsk_fname = 0;
-	uint8_t the_scheme = 1;
-        zonemd placeholders[MAX_ZONEMD_COUNT];
+	uint8_t opt_scheme = 1;
+	placeholder placeholders[MAX_ZONEMD_COUNT];
 	unsigned int placeholder_cnt = 0;
 	int calculate = 0;
 	int verify = 0;
@@ -934,7 +875,7 @@ main(int argc, char *argv[])
 			quiet = 1;
 			break;
 		case 's':
-			the_scheme = (uint8_t) strtoul(optarg, 0, 10);
+			opt_scheme = (uint8_t) strtoul(optarg, 0, 10);
 			break;
 		case 't':
 			print_timings = 1;
@@ -969,15 +910,15 @@ main(int argc, char *argv[])
 
 
 
-	switch (the_scheme) {
+	switch (opt_scheme) {
 	case 1:
-		the_zonemd = zonemd_simple_new(the_scheme);
+		the_scheme = scheme_simple_new(opt_scheme);
 		break;
 	case 240:
-		the_zonemd = zonemd_merkle_new(the_scheme);
+		the_scheme = scheme_merkle_new(opt_scheme);
 		break;
 	default:
-		errx(1, "%s(%d): Unsupported scheme %u", __FILE__, __LINE__, the_zonemd->scheme);
+		errx(1, "%s(%d): Unsupported scheme %u", __FILE__, __LINE__, opt_scheme);
 		break;
 	}
 	zonemd_read_zone(origin_str, input, 0, LDNS_RR_CLASS_IN);
@@ -1000,11 +941,7 @@ main(int argc, char *argv[])
 	}
 	my_getrusage(&t4);
 	if (output_file && (placeholder_cnt || calculate)) {
-		FILE *fp = fopen(output_file, "w");
-		if (!fp)
-			err(1, "%s(%d): %s", __FILE__, __LINE__, output_file);
-		zonemd_write_zone(fp);
-		fclose(fp);
+		zonemd_write_zone(output_file);
 	}
 
 	if (zsk_fname)
@@ -1015,17 +952,7 @@ main(int argc, char *argv[])
 		free(output_file);
 	if (update_file)
 		free(update_file);
-	switch (the_zonemd->scheme) {
-	case 1:
-		zonemd_simple_free(the_zonemd);
-		break;
-	case 240:
-		zonemd_merkle_free(the_zonemd);
-		break;
-	default:
-		errx(1, "%s(%d): Unsupported scheme %u", __FILE__, __LINE__, the_zonemd->scheme);
-		break;
-	}
+	the_scheme->free(the_scheme);
 
 	if (print_timings)
 		printf("TIMINGS: load %7.2lf calculate %7.2lf verify %7.2lf update %7.2lf\n",

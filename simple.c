@@ -7,17 +7,21 @@
 #include "simple.h"
 
 
-zonemd *
-zonemd_simple_new(uint8_t scheme)
+scheme *
+scheme_simple_new(uint8_t opt_scheme)
 {
-	zonemd *zmd;
-	assert(1 == scheme);
-	zmd = calloc(1, sizeof(*zmd));
-	assert(zmd);
-	zmd->scheme = scheme;
-	zmd->data = ldns_rr_list_new();
-	assert(zmd->data);
-	return zmd;
+	scheme *s;
+	assert(1 == opt_scheme);
+	s = calloc(1, sizeof(*s));
+	assert(s);
+	s->scheme = opt_scheme;
+	s->leaf = scheme_simple_get_leaf_rr_list;
+	s->calc = scheme_simple_calc_digest;
+	s->iter = scheme_simple_iterate;
+	s->free = scheme_simple_free;
+	s->data = ldns_rr_list_new();
+	assert(s->data);
+	return s;
 }
 
 /*
@@ -26,36 +30,39 @@ zonemd_simple_new(uint8_t scheme)
  * In the case of the simple data structure, there is just one list.
  */
 ldns_rr_list *
-zonemd_simple_get_rr_list(const zonemd *zmd, const ldns_rr * rr_unused)
+scheme_simple_get_leaf_rr_list(const scheme *s, const ldns_rr * rr_unused)
 {
-	return zmd->data;
+	return s->data;
 }
 
 /*
- * Return an ldns_rr_list with ALL RRs in the zone.
- * 
- * In the case of the simple data structure, there is already just one list.
+ * Iterate over ALL RRs in the zone.
  */
-ldns_rr_list *
-zonemd_simple_get_full_rr_list(const zonemd *zmd)
+void
+scheme_simple_iterate(const scheme *s, const scheme_iterate_cb cb, const void *cb_data)
 {
-	return zmd->data;
+	unsigned int i;
+	ldns_rr_list *rrlist = s->data;
+	ldns_rr_list_sort(rrlist);
+	for (i = 0; i < ldns_rr_list_rr_count(rrlist); i++) {
+		cb(ldns_rr_list_rr(rrlist, i), cb_data);
+	}
 }
 
 /*
- * zonemd_calc_digest()
+ * scheme_calc_digest()
  *
  * Calculate a digest over the zone.
  */
 void
-zonemd_simple_calc_digest(const zonemd *zmd, const EVP_MD * md, unsigned char *buf)
+scheme_simple_calc_digest(const scheme *s, const EVP_MD * md, unsigned char *buf)
 {
 	EVP_MD_CTX *ctx;
 	ctx = EVP_MD_CTX_create();
 	assert(ctx);
 	if (!EVP_DigestInit(ctx, md))
 		errx(1, "%s(%d): Digest init failed", __FILE__, __LINE__);
-	zonemd_rrlist_digest(zmd->data, ctx);
+	zonemd_rrlist_digest(s->data, ctx);
 	if (!EVP_DigestFinal_ex(ctx, buf, 0))
 		errx(1, "%s(%d): Digest final failed", __FILE__, __LINE__);
 	EVP_MD_CTX_destroy(ctx);
@@ -65,10 +72,10 @@ zonemd_simple_calc_digest(const zonemd *zmd, const EVP_MD * md, unsigned char *b
  * Free data associated with the data structure
  */
 void
-zonemd_simple_free(zonemd *zmd)
+scheme_simple_free(scheme *s)
 {
-	assert(zmd->data);
-	ldns_rr_list_deep_free(zmd->data);
-	memset(zmd, 0, sizeof(*zmd));
-	free(zmd);
+	assert(s->data);
+	ldns_rr_list_deep_free(s->data);
+	memset(s, 0, sizeof(*s));
+	free(s);
 }
