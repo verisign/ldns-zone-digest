@@ -338,20 +338,20 @@ zonemd_remove_rr(ldns_rr_type type, ldns_rr_type covered)
  * wrapper around EVP_get_digestbyname() and so we can reference by number
  */
 const EVP_MD *
-zonemd_digester(uint8_t hashalg)
+zonemd_digester(uint8_t hashalg, const char *file, const int line, bool warn_unsupported)
 {
 	const char *name = 0;
 	const EVP_MD *md = 0;
-	OpenSSL_add_all_digests();
 	if (hashalg == 1) {
 		name = "sha384";
 	} else {
-		/* warnx("%s(%d): Unsupported hash algorithm %u", __FILE__, __LINE__, hashalg); */
+		if (warn_unsupported)
+			warnx("%s(%d): Unsupported hash algorithm %u", file, line, hashalg);
 		return 0;
 	}
 	md = EVP_get_digestbyname(name);
 	if (md == 0)
-		errx(1, "%s(%d): Unknown message hash algorithm '%s'", __FILE__, __LINE__, name);
+		errx(1, "%s(%d): Unknown message hash algorithm '%s'", file, line, name);
 	return md;
 }
 
@@ -402,7 +402,7 @@ zonemd_rrlist_digest(ldns_rr_list *rrlist, EVP_MD_CTX *ctx)
 			const EVP_MD *md = 0;
 			rr_copy = ldns_rr_clone(rr);
 			zonemd_rr_unpack(rr_copy, &serial, &scheme, &hashalg, digest, &digest_len);
-			md = zonemd_digester(hashalg);
+			md = zonemd_digester(hashalg, __FILE__, __LINE__, 0);
 			if (md != 0) {
 				assert(EVP_MD_size(md) <= (int) sizeof(digest));
 				digest_len = EVP_MD_size(md);
@@ -557,7 +557,7 @@ zonemd_add_placeholders(placeholder placeholders[], unsigned int count)
 			continue;
 		}
 
-		md = zonemd_digester(placeholders[i].hashalg);
+		md = zonemd_digester(placeholders[i].hashalg, __FILE__, __LINE__, 1);
 		assert(md);
 		digest_len = EVP_MD_size(md);
 		assert(digest_len);
@@ -735,10 +735,11 @@ do_calculate(const char *zsk_fname)
 		const EVP_MD *md = 0;
 		ldns_rr *zonemd_rr = ldns_rr_list_rr(zonemd_rr_list, i);
 		zonemd_rr_unpack(zonemd_rr, 0, &found_scheme, &found_hashalg, 0, 0);
-		if (!supported_scheme(found_scheme, __FILE__, __LINE__, 1))
+		if (!supported_scheme(found_scheme, __FILE__, __LINE__, 0))
 			continue;
-		md = zonemd_digester(found_hashalg);
-		assert(md);
+		md = zonemd_digester(found_hashalg, __FILE__, __LINE__, 1);
+		if (0 == md)
+			continue;
 		md_len = EVP_MD_size(md);
 		md_buf = calloc(1, md_len);
 		assert(md_buf);
@@ -780,7 +781,7 @@ do_verify(void)
 		}
 		if (!supported_scheme(found_scheme, __FILE__, __LINE__, 0))
 			continue;
-		md = zonemd_digester(found_hashalg);
+		md = zonemd_digester(found_hashalg, __FILE__, __LINE__, 1);
 		if (md == 0) {
 			fprintf(stderr, "Unable to verify unsupported hash algorithm %u\n", found_hashalg);
 			continue;
@@ -844,6 +845,8 @@ main(int argc, char *argv[])
 	if (0 == progname)
 		progname = argv[0];
 	memset(placeholders, 0, sizeof(placeholders));
+
+	OpenSSL_add_all_digests();
 
 	while ((ch = getopt(argc, argv, "co:p:qs:tu:vz:")) != -1) {
 		switch (ch) {
