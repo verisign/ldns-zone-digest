@@ -111,7 +111,7 @@ zonemd_rr_create(ldns_rdf * owner, uint32_t ttl)
  * This function packs ZONEMD rdata into an existing RR.
  */
 void
-zonemd_rr_pack(ldns_rr *rr, uint32_t serial, uint8_t digest_type, uint8_t parameter, void *digest, size_t digest_sz)
+zonemd_rr_pack(ldns_rr *rr, uint32_t serial, uint8_t scheme, uint8_t hashalg, void *digest, size_t digest_sz)
 {
 	while (ldns_rr_rd_count(rr) > 0) {
 		ldns_rdf *rdf = ldns_rr_pop_rdf (rr);
@@ -122,16 +122,16 @@ zonemd_rr_pack(ldns_rr *rr, uint32_t serial, uint8_t digest_type, uint8_t parame
 		if (digest == 0)
 			digest = tbuf = calloc(1, digest_sz);
 		ldns_rdf *rdf_serial = ldns_native2rdf_int32(LDNS_RDF_TYPE_INT32, serial);
-		ldns_rdf *rdf_digtype = ldns_native2rdf_int8(LDNS_RDF_TYPE_INT8, digest_type);
-		ldns_rdf *rdf_parameter = ldns_native2rdf_int8(LDNS_RDF_TYPE_INT8, parameter);
+		ldns_rdf *rdf_scheme = ldns_native2rdf_int8(LDNS_RDF_TYPE_INT8, scheme);
+		ldns_rdf *rdf_hashalg = ldns_native2rdf_int8(LDNS_RDF_TYPE_INT8, hashalg);
 		ldns_rdf *rdf_digest = ldns_rdf_new_frm_data(LDNS_RDF_TYPE_HEX, digest_sz, digest);
 		assert(rdf_serial);
-		assert(rdf_digtype);
-		assert(rdf_parameter);
+		assert(rdf_scheme);
+		assert(rdf_hashalg);
 		assert(rdf_digest);
 		ldns_rr_push_rdf(rr, rdf_serial);
-		ldns_rr_push_rdf(rr, rdf_digtype);
-		ldns_rr_push_rdf(rr, rdf_parameter);
+		ldns_rr_push_rdf(rr, rdf_scheme);
+		ldns_rr_push_rdf(rr, rdf_hashalg);
 		ldns_rr_push_rdf(rr, rdf_digest);
 		if (tbuf)
 			free(tbuf);
@@ -139,7 +139,8 @@ zonemd_rr_pack(ldns_rr *rr, uint32_t serial, uint8_t digest_type, uint8_t parame
 		char *buf;
 		buf = calloc(1, 4 + 1 + 1 + digest_sz);
 		ldns_write_uint32(&buf[0], serial);
-		memcpy(&buf[4], &digest_type, 1);
+		memcpy(&buf[4], &scheme, 1);
+		memcpy(&buf[5], &hashalg, 1);
 		if (digest && digest_sz)
 			memcpy(&buf[6], digest, digest_sz);
 		ldns_rdf *rdf = ldns_rdf_new_frm_data(LDNS_RDF_TYPE_UNKNOWN, 4 + 1 + 1 + digest_sz, buf);
@@ -185,7 +186,7 @@ zonemd_rr_find(void)
  * This function unpacks ZONEMD fields into the ret_ paramaters.
  */
 void
-zonemd_rr_unpack(ldns_rr *rr, uint32_t *ret_serial, uint8_t *ret_digest_type, uint8_t *ret_parameter, void *ret_digest, unsigned int *ret_digest_sz)
+zonemd_rr_unpack(ldns_rr *rr, uint32_t *ret_serial, uint8_t *ret_scheme, uint8_t *ret_hashalg, void *ret_digest, unsigned int *ret_digest_sz)
 {
 	ldns_rdf *rdf = 0;
 	if (ldns_knows_about_zonemd) {
@@ -199,14 +200,14 @@ zonemd_rr_unpack(ldns_rr *rr, uint32_t *ret_serial, uint8_t *ret_digest_type, ui
 		assert(rdf);
 		if (LDNS_RDF_TYPE_INT8 != ldns_rdf_get_type(rdf))
 			errx(1, "%s(%d): %s RDF #2 expected type %u, but got type %u", __FILE__, __LINE__, RRNAME, LDNS_RDF_TYPE_INT8, ldns_rdf_get_type(rdf));
-		if (ret_digest_type)
-			*ret_digest_type = ldns_rdf2native_int8(rdf);
+		if (ret_scheme)
+			*ret_scheme = ldns_rdf2native_int8(rdf);
 		rdf = ldns_rr_rdf(rr, 2);
 		assert(rdf);
 		if (LDNS_RDF_TYPE_INT8 != ldns_rdf_get_type(rdf))
 			errx(1, "%s(%d): %s RDF #3 expected type %u, but got type %u", __FILE__, __LINE__, RRNAME, LDNS_RDF_TYPE_INT8, ldns_rdf_get_type(rdf));
-		if (ret_parameter)
-			*ret_parameter = ldns_rdf2native_int8(rdf);
+		if (ret_hashalg)
+			*ret_hashalg = ldns_rdf2native_int8(rdf);
 		rdf = ldns_rr_rdf(rr, 3);
 		assert(rdf);
 		if (LDNS_RDF_TYPE_HEX != ldns_rdf_get_type(rdf))
@@ -229,11 +230,11 @@ zonemd_rr_unpack(ldns_rr *rr, uint32_t *ret_serial, uint8_t *ret_digest_type, ui
 		if (ret_serial)
 			*ret_serial = ldns_read_uint32(&buf[0]);
 		rdlen -= 4;
-		if (ret_digest_type)
-			memcpy(ret_digest_type, &buf[4], 1);
+		if (ret_scheme)
+			memcpy(ret_scheme, &buf[4], 1);
 		rdlen -= 1;
-		if (ret_digest_type)
-			memcpy(ret_parameter, &buf[4], 1);
+		if (ret_hashalg)
+			memcpy(ret_hashalg, &buf[5], 1);
 		rdlen -= 1;
 		if (ret_digest) {
 			assert(ret_digest_sz);
@@ -253,12 +254,12 @@ void
 zonemd_rr_update_digest(ldns_rr * rr, unsigned char *new_digest_buf, unsigned int new_digest_len)
 {
 	uint32_t serial = 0;
-	uint8_t digest_type;
-	uint8_t parameter;
+	uint8_t scheme;
+	uint8_t hashalg;
         unsigned int old_digest_sz = EVP_MAX_MD_SIZE;
 	unsigned char old_digest_buf[EVP_MAX_MD_SIZE];
-	zonemd_rr_unpack(rr, &serial, &digest_type, &parameter, old_digest_buf, &old_digest_sz);
-	zonemd_rr_pack(rr, serial, digest_type, parameter, new_digest_buf, new_digest_len);
+	zonemd_rr_unpack(rr, &serial, &scheme, &hashalg, old_digest_buf, &old_digest_sz);
+	zonemd_rr_pack(rr, serial, scheme, hashalg, new_digest_buf, new_digest_len);
 }
 
 /*
@@ -345,20 +346,20 @@ zonemd_remove_rr(ldns_rr_type type, ldns_rr_type covered)
  * wrapper around EVP_get_digestbyname() and so we can reference by number
  */
 const EVP_MD *
-zonemd_digester(uint8_t type)
+zonemd_digester(uint8_t hashalg)
 {
 	const char *name = 0;
 	const EVP_MD *md = 0;
 	OpenSSL_add_all_digests();
-	if (type == 1) {
+	if (hashalg == 1) {
 		name = "sha384";
 	} else {
-		/* warnx("%s(%d): Unsupported digest type %u", __FILE__, __LINE__, type); */
+		/* warnx("%s(%d): Unsupported hash algorithm %u", __FILE__, __LINE__, hashalg); */
 		return 0;
 	}
 	md = EVP_get_digestbyname(name);
 	if (md == 0)
-		errx(1, "%s(%d): Unknown message digest '%s'", __FILE__, __LINE__, name);
+		errx(1, "%s(%d): Unknown message hash algorithm '%s'", __FILE__, __LINE__, name);
 	return md;
 }
 
@@ -401,15 +402,15 @@ zonemd_rrlist_digest(ldns_rr_list *rrlist, EVP_MD_CTX *ctx)
 		 * For ZONEMD RRs at apex, create a copy with digest zeroized
 		 */
 		if (ldns_rr_get_type(rr) == LDNS_RR_TYPE_ZONEMD && ldns_dname_compare(ldns_rr_owner(rr), origin) == 0) {
-			uint8_t type = 0;
-			uint8_t parameter = 0;
+			uint8_t scheme = 0;
+			uint8_t hashalg = 0;
 			unsigned char digest[EVP_MAX_MD_SIZE];
 			unsigned int digest_len = EVP_MAX_MD_SIZE;
 			uint32_t serial = 0;
 			const EVP_MD *md = 0;
 			rr_copy = ldns_rr_clone(rr);
-			zonemd_rr_unpack(rr_copy, &serial, &type, &parameter, digest, &digest_len);
-			md = zonemd_digester(type);
+			zonemd_rr_unpack(rr_copy, &serial, &scheme, &hashalg, digest, &digest_len);
+			md = zonemd_digester(hashalg);
 			if (md != 0) {
 				assert(EVP_MD_size(md) <= (int) sizeof(digest));
 				digest_len = EVP_MD_size(md);
@@ -507,7 +508,7 @@ usage(const char *p)
 	fprintf(stderr, "\t-c\t\tcalculate the zone digest\n");
 	fprintf(stderr, "\t-o file\t\twrite zone to output file\n");
 	fprintf(stderr, "\t-u file\t\tfile containing RR updates\n");
-	fprintf(stderr, "\t-p type\t\tinsert placeholder record of type\n");
+	fprintf(stderr, "\t-p s,h\t\tinsert placeholder record of scheme s and hashalg h\n");
 	fprintf(stderr, "\t-v\t\tverify the zone digest\n");
 	fprintf(stderr, "\t-z\t\tZSK file name\n");
 #if ZONEMD_INCREMENTAL
@@ -542,7 +543,7 @@ elapsed_msec(struct timeval *a, struct timeval *b)
  * has a ZONEMD record, it is removed and discarded.
  */
 void
-zonemd_add_placeholders(uint8_t digest_types[], uint8_t parameters[], unsigned int digest_types_cnt)
+zonemd_add_placeholders(zonemd placeholders[], unsigned int count)
 {
 	ldns_rdf *soa_serial_rdf = 0;
 	uint32_t soa_serial;
@@ -555,7 +556,7 @@ zonemd_add_placeholders(uint8_t digest_types[], uint8_t parameters[], unsigned i
 	soa_serial_rdf = ldns_rr_rdf(the_soa, 2);
 	soa_serial = ldns_rdf2native_int32(soa_serial_rdf);
 
-	for (i = 0; i < digest_types_cnt; i++) {
+	for (i = 0; i < count; i++) {
 		const EVP_MD *md = 0;
 		unsigned int digest_len = 0;
 		unsigned char *digest_buf = 0;
@@ -564,25 +565,29 @@ zonemd_add_placeholders(uint8_t digest_types[], uint8_t parameters[], unsigned i
 		bool is_dupe = 0;
 
 		for (j = 0; j < i; j++)
-			if (digest_types[i] == digest_types[j])
-				is_dupe |= 1;
+			if (placeholders[i].scheme == placeholders[j].scheme)
+				if (placeholders[i].hashalg == placeholders[j].hashalg)
+					is_dupe |= 1;
 
 		if (is_dupe) {
-			fprintf(stderr, "Ignoring duplicate digest type %u\n", digest_types[i]);
+			fprintf(stderr, "Ignoring duplicate digest scheme %u and type %u\n",
+				placeholders[i].scheme, placeholders[i].hashalg);
 			continue;
 		}
 
-		md = zonemd_digester(digest_types[i]);
+		md = zonemd_digester(placeholders[i].hashalg);
 		assert(md);
 		digest_len = EVP_MD_size(md);
 		assert(digest_len);
 		digest_buf = calloc(1, digest_len);
 		assert(digest_buf);
 		zonemd = zonemd_rr_create(ldns_rr_owner(the_soa), ldns_rr_ttl(the_soa));
-		zonemd_rr_pack(zonemd, soa_serial, digest_types[i], parameters[i], digest_buf, digest_len);
+		zonemd_rr_pack(zonemd, soa_serial, placeholders[i].scheme, placeholders[i].hashalg, digest_buf, digest_len);
 		free(digest_buf);
 		if (!quiet)
-			fprintf(stderr, "Add placeholder ZONEMD with digest type %u\n", digest_types[i]);
+			fprintf(stderr, "Add placeholder ZONEMD with scheme %u and hash algorithm %u\n",
+				placeholders[i].scheme,
+				placeholders[i].hashalg);
 		zonemd_add_rr(zonemd);
 	}
 }
@@ -716,14 +721,14 @@ do_calculate(const char *zsk_fname)
 	if (!zonemd_rr_list)
 		errx(1, "%s(%d): No %s record found at zone apex.  Use -p to add one.", __FILE__, __LINE__, RRNAME);
 	for (i = 0; i < ldns_rr_list_rr_count(zonemd_rr_list); i++) {
-		uint8_t found_digest_type = 0;
-		uint8_t found_parameter = 0;
+		uint8_t found_scheme = 0;
+		uint8_t found_hashalg = 0;
 		unsigned char *md_buf = 0;
 		unsigned int md_len = 0;
 		const EVP_MD *md = 0;
 		ldns_rr *zonemd_rr = ldns_rr_list_rr(zonemd_rr_list, i);
-		zonemd_rr_unpack(zonemd_rr, 0, &found_digest_type, &found_parameter, 0, 0);
-		md = zonemd_digester(found_digest_type);
+		zonemd_rr_unpack(zonemd_rr, 0, &found_scheme, &found_hashalg, 0, 0);
+		md = zonemd_digester(found_hashalg);
 		assert(md);
 		md_len = EVP_MD_size(md);
 		md_buf = calloc(1, md_len);
@@ -750,8 +755,8 @@ do_verify(void)
 	if (!zonemd_rr_list)
 		errx(1, "%s(%d): No %s record found at zone apex, cannot verify.", __FILE__, __LINE__, RRNAME);
 	for (i = 0; i < ldns_rr_list_rr_count(zonemd_rr_list); i++) {
-		uint8_t found_digest_type;
-		uint8_t found_parameter;
+		uint8_t found_scheme;
+		uint8_t found_hashalg;
 		unsigned char found_digest_buf[EVP_MAX_MD_SIZE];
 		unsigned int found_digest_len = EVP_MAX_MD_SIZE;
 		uint32_t found_serial = 0;
@@ -761,27 +766,20 @@ do_verify(void)
 		unsigned char *md_buf = 0;
 		unsigned int md_len = 0;
 		ldns_rr *zonemd_rr = ldns_rr_list_rr(zonemd_rr_list, i);
-		zonemd_rr_unpack(zonemd_rr, &found_serial, &found_digest_type, &found_parameter, found_digest_buf, &found_digest_len);
+		zonemd_rr_unpack(zonemd_rr, &found_serial, &found_scheme, &found_hashalg, found_digest_buf, &found_digest_len);
 		soa_serial_rdf = ldns_rr_rdf(the_soa, 2);
 		soa_serial = ldns_rdf2native_int32(soa_serial_rdf);
 		if (found_serial != soa_serial) {
 			fprintf(stderr, "%s(%d): SOA serial (%u) does not match ZONEMD serial (%u)\n", __FILE__, __LINE__, soa_serial, found_serial);
 			continue;
 		}
-		md = zonemd_digester(found_digest_type);
+		md = zonemd_digester(found_hashalg);
 		if (md == 0) {
-			fprintf(stderr, "Unable to verify unsupported digest type %u,%u\n", found_digest_type, found_parameter);
+			fprintf(stderr, "Unable to verify unsupported hash algorithm %u\n", found_hashalg);
 			continue;
 		}
 		assert(EVP_MD_size(md) <= (int) sizeof(found_digest_buf));
 		md_len = EVP_MD_size(md);
-		if (found_digest_type == 1) {
-			/* SHA384-SIMPLE */
-			if (found_parameter != 0) {
-				fprintf(stderr, "Parameter value %u not supported for digest type %u\n", found_parameter, found_digest_type);
-				continue;
-			}
-		}
 		md_buf = calloc(1, md_len);
 		assert(md_buf);
 #if !ZONEMD_INCREMENTAL
@@ -790,12 +788,12 @@ do_verify(void)
 		zonemd_merkle_calc_digest(the_zonemd, md_buf);
 #endif
 		if (memcmp(found_digest_buf, md_buf, md_len) != 0) {
-			fprintf(stderr, "Found and calculated digests for type %u,%u do NOT match.\n", found_digest_type, found_parameter);
+			fprintf(stderr, "Found and calculated digests for scheme:hashalg %u:%u do NOT match.\n", found_scheme, found_hashalg);
 			zonemd_print_digest(stderr, "Found     : ", found_digest_buf, md_len, "\n");
 			zonemd_print_digest(stderr, "Calculated: ", md_buf, md_len, "\n");
 		} else {
 			if (!quiet)
-				fprintf(stderr, "Found and calculated digests for type %u,%u do MATCH.\n", found_digest_type, found_parameter);
+				fprintf(stderr, "Found and calculated digests for scheme:hashalg %u:%u do MATCH.\n", found_scheme, found_hashalg);
 			rc = 0;
 		}
 		free(md_buf);
@@ -830,8 +828,7 @@ main(int argc, char *argv[])
 	char *update_file = 0;
 	char *origin_str = 0;
 	char *zsk_fname = 0;
-	uint8_t algorithms[MAX_ZONEMD_COUNT];
-	uint8_t parameters[MAX_ZONEMD_COUNT];
+        zonemd placeholders[MAX_ZONEMD_COUNT];
 	unsigned int placeholder_cnt = 0;
 	int calculate = 0;
 	int verify = 0;
@@ -842,8 +839,7 @@ main(int argc, char *argv[])
 	progname = strrchr(argv[0], '/');
 	if (0 == progname)
 		progname = argv[0];
-	memset(algorithms, 0, sizeof(algorithms));
-	memset(parameters, 0, sizeof(parameters));
+	memset(placeholders, 0, sizeof(placeholders));
 
 	while ((ch = getopt(argc, argv, "co:p:tu:vz:W:D:q")) != -1) {
 		switch (ch) {
@@ -856,10 +852,18 @@ main(int argc, char *argv[])
 		case 'p':
 			if (placeholder_cnt < MAX_ZONEMD_COUNT) {
 				char *p;
-				p = strtok(optarg, ",");
-				algorithms[placeholder_cnt] = (uint8_t) strtoul(p, 0, 10);
+				p = strtok(optarg, ",.:/-+");
+				if (0 == p) {
+					warnx("%s(%d): bad -p arg", __FILE__, __LINE__);
+					usage(progname);
+				}
+				placeholders[placeholder_cnt].scheme = (uint8_t) strtoul(p, 0, 10);
 				p = strtok(0, "");
-				parameters[placeholder_cnt] = (uint8_t) strtoul(p, 0, 10);
+				if (0 == p) {
+					warnx("%s(%d): bad -p arg", __FILE__, __LINE__);
+					usage(progname);
+				}
+				placeholders[placeholder_cnt].hashalg = (uint8_t) strtoul(p, 0, 10);
 				placeholder_cnt++;
 			}
 			break;
@@ -900,16 +904,16 @@ main(int argc, char *argv[])
 
 
 #if !ZONEMD_INCREMENTAL
-	the_zonemd = zonemd_simple_new(1, 0);
+	the_zonemd = zonemd_simple_new(1, 1);
 #else
-	the_zonemd = zonemd_merkle_new(2, 5);
+	the_zonemd = zonemd_merkle_new(240, 1);
 #endif
 	zonemd_read_zone(origin_str, input, 0, LDNS_RR_CLASS_IN);
         fclose(input);
         input = 0;
 
 	if (placeholder_cnt)
-		zonemd_add_placeholders(algorithms, parameters, placeholder_cnt);
+		zonemd_add_placeholders(placeholders, placeholder_cnt);
 	my_getrusage(&t1);
 	if (calculate)
 		do_calculate(zsk_fname);

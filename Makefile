@@ -2,7 +2,7 @@ PROG=ldns-zone-digest
 
 
 OBJS=simple.o merkle.o
-CPPFLAGS='-Wall -g'
+CPPFLAGS=-Wall -g
 LDFLAGS=-lldns -lcrypto
 
 

@@ -8,12 +8,12 @@
 
 
 zonemd *
-zonemd_simple_new(uint8_t type, uint8_t parameter)
+zonemd_simple_new(uint8_t scheme, uint8_t hashalg)
 {
 	const char *md_name;
 	zonemd *zmd;
 
-	if (type == 1) {
+	if (hashalg == 1) {
 		md_name = "sha384";
 	} else {
 		return 0;
@@ -21,11 +21,11 @@ zonemd_simple_new(uint8_t type, uint8_t parameter)
 
 	zmd = calloc(1, sizeof(*zmd));
 	assert(zmd);
-	zmd->type = type;
-	zmd->parameter = parameter;
+	zmd->scheme = scheme;
+	zmd->hashalg = hashalg;
 	zmd->md = EVP_get_digestbyname(md_name);
 	if (zmd->md == 0)
-		errx(1, "%s(%d): Unknown message digest '%s'", __FILE__, __LINE__, md_name);
+		errx(1, "%s(%d): Unknown hash algorithm '%s'", __FILE__, __LINE__, md_name);
 	zmd->data = ldns_rr_list_new();
 	assert(zmd->data);
 	return zmd;

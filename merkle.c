@@ -17,7 +17,8 @@ typedef struct _zonemd_tree
 	bool dirty;
 } zonemd_tree;
 
-unsigned int zonemd_tree_max_width = 13;
+unsigned int merkle_tree_max_width = 13;
+unsigned int merkle_tree_max_depth = 7;
 
 #if ZONEMD_SAVE_LEAF_COUNTS
 FILE *save_leaf_counts = 0;
@@ -43,7 +44,7 @@ zonemd_tree_branch_by_name(unsigned int depth, const char *name)
 	if (len == 0)
 		return 0;
 	pos = depth % len;
-	branch = *(name + pos) % zonemd_tree_max_width;
+	branch = *(name + pos) % merkle_tree_max_width;
 	//fdebugf(stderr, "%s(%d): zonemd_tree_branch_by_name '%s' depth %u pos %u branch %u\n", __FILE__, __LINE__, name,
 	//	depth, pos, branch);
 	return branch;
@@ -58,10 +59,10 @@ static zonemd_tree *
 zonemd_tree_get_leaf_by_name_sub(const zonemd *zmd, zonemd_tree * node, const char *name)
 {
 	node->dirty = true;
-	if (zmd->parameter > node->depth) {
+	if (merkle_tree_max_depth > node->depth) {
 		unsigned int branch = zonemd_tree_branch_by_name(node->depth, name);
 		if (node->kids == 0) {
-			node->kids = calloc(zonemd_tree_max_width, sizeof(*node->kids));
+			node->kids = calloc(merkle_tree_max_width, sizeof(*node->kids));
 			assert(node->kids);
 		}
 		if (node->kids[branch] == 0) {
@@ -93,9 +94,9 @@ zonemd_tree_full_rrlist_sub(const zonemd *zmd, zonemd_tree * node, ldns_rr_list 
 {
 	if (node == 0)
 		return;
-	if (zmd->parameter > node->depth && node->kids) {
+	if (merkle_tree_max_depth > node->depth && node->kids) {
 		unsigned int branch;
-		for (branch = 0; branch < zonemd_tree_max_width; branch++)
+		for (branch = 0; branch < merkle_tree_max_width; branch++)
 			zonemd_tree_full_rrlist_sub(zmd, node->kids[branch], rrlist);
 		return;
 	}
@@ -117,9 +118,9 @@ zonemd_tree_free_sub(zonemd *zmd, zonemd_tree * node)
 {
 	if (node == 0)
 		return;
-	if (zmd->parameter > node->depth && node->kids) {
+	if (merkle_tree_max_depth > node->depth && node->kids) {
 		unsigned int branch;
-		for (branch = 0; branch < zonemd_tree_max_width; branch++) {
+		for (branch = 0; branch < merkle_tree_max_width; branch++) {
 			zonemd_tree_free_sub(zmd, node->kids[branch]);
 			free(node->kids[branch]);
 		}
@@ -133,13 +134,13 @@ zonemd_tree_free_sub(zonemd *zmd, zonemd_tree * node)
 /* ============================================================================== */
 
 zonemd *
-zonemd_merkle_new(uint8_t type, uint8_t parameter)
+zonemd_merkle_new(uint8_t scheme, uint8_t hashalg)
 {
         const char *md_name;
         zonemd *zmd;
-	fdebugf(stderr, "Creating Merkle Tree of type %u with parameter %u\n", type, parameter);
+	fdebugf(stderr, "Creating Merkle Tree of scheme %u\n", scheme);
 
-        if (type == 2) {
+        if (hashalg == 1) {
                 md_name = "sha384";
         } else {
                 return 0;
@@ -147,11 +148,11 @@ zonemd_merkle_new(uint8_t type, uint8_t parameter)
 
         zmd = calloc(1, sizeof(*zmd));
         assert(zmd);
-        zmd->type = type;
-        zmd->parameter = parameter;
+        zmd->scheme = scheme;
+        zmd->hashalg = hashalg;
         zmd->md = EVP_get_digestbyname(md_name);
         if (zmd->md == 0)
-                errx(1, "%s(%d): Unknown message digest '%s'", __FILE__, __LINE__, md_name);
+                errx(1, "%s(%d): Unknown hash algorithm '%s'", __FILE__, __LINE__, md_name);
         zmd->data = calloc(1, sizeof(zonemd_tree));
         assert(zmd->data);
 #if ZONEMD_SAVE_LEAF_COUNTS
@@ -206,10 +207,10 @@ zonemd_merkle_calc_digest_sub(const zonemd *zmd, zonemd_tree *node, unsigned cha
 	assert(ctx);
 	if (!EVP_DigestInit(ctx, zmd->md))
 		errx(1, "%s(%d): Digest init failed", __FILE__, __LINE__);
-	if (zmd->parameter > node->depth) {
+	if (merkle_tree_max_depth > node->depth) {
 		unsigned int branch;
 		assert(node->kids);
-		for (branch = 0; branch < zonemd_tree_max_width; branch++) {
+		for (branch = 0; branch < merkle_tree_max_width; branch++) {
 			if (node->kids[branch] == 0)
 				continue;
 			zonemd_merkle_calc_digest_sub(zmd, node->kids[branch], (unsigned char *) node->digest);

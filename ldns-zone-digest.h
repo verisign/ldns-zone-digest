@@ -12,8 +12,8 @@ void zonemd_print_digest(FILE *fp, const char *preamble, const unsigned char *bu
 
 
 typedef struct _zonemd {
-	uint8_t type;
-	uint8_t parameter;
+	uint8_t scheme;
+	uint8_t hashalg;
 	const EVP_MD * md;
-	void *data;
+	void *data;	/* data structure for zone data */
 } zonemd;
