@@ -134,25 +134,14 @@ zonemd_tree_free_sub(zonemd *zmd, zonemd_tree * node)
 /* ============================================================================== */
 
 zonemd *
-zonemd_merkle_new(uint8_t scheme, uint8_t hashalg)
+zonemd_merkle_new(uint8_t scheme)
 {
-        const char *md_name;
         zonemd *zmd;
 	fdebugf(stderr, "Creating Merkle Tree of scheme %u\n", scheme);
-
-        if (hashalg == 1) {
-                md_name = "sha384";
-        } else {
-                return 0;
-        }
 
         zmd = calloc(1, sizeof(*zmd));
         assert(zmd);
         zmd->scheme = scheme;
-        zmd->hashalg = hashalg;
-        zmd->md = EVP_get_digestbyname(md_name);
-        if (zmd->md == 0)
-                errx(1, "%s(%d): Unknown hash algorithm '%s'", __FILE__, __LINE__, md_name);
         zmd->data = calloc(1, sizeof(zonemd_tree));
         assert(zmd->data);
 #if ZONEMD_SAVE_LEAF_COUNTS
@@ -195,7 +184,7 @@ zonemd_merkle_get_full_rr_list(const zonemd *zmd)
 }
 
 static void
-zonemd_merkle_calc_digest_sub(const zonemd *zmd, zonemd_tree *node, unsigned char *buf)
+zonemd_merkle_calc_digest_sub(const zonemd *zmd, zonemd_tree *node, const EVP_MD * md, unsigned char *buf)
 {
 	EVP_MD_CTX *ctx;
 	//fdebugf(stderr, "%s(%d): zonemd_calc_digest depth %u branch %u\n", __FILE__, __LINE__, node->depth,
@@ -205,7 +194,7 @@ zonemd_merkle_calc_digest_sub(const zonemd *zmd, zonemd_tree *node, unsigned cha
 		return;
 	ctx = EVP_MD_CTX_create();
 	assert(ctx);
-	if (!EVP_DigestInit(ctx, zmd->md))
+	if (!EVP_DigestInit(ctx, md))
 		errx(1, "%s(%d): Digest init failed", __FILE__, __LINE__);
 	if (merkle_tree_max_depth > node->depth) {
 		unsigned int branch;
@@ -213,8 +202,8 @@ zonemd_merkle_calc_digest_sub(const zonemd *zmd, zonemd_tree *node, unsigned cha
 		for (branch = 0; branch < merkle_tree_max_width; branch++) {
 			if (node->kids[branch] == 0)
 				continue;
-			zonemd_merkle_calc_digest_sub(zmd, node->kids[branch], (unsigned char *) node->digest);
-			if (!EVP_DigestUpdate(ctx, node->digest, EVP_MD_size(zmd->md)))
+			zonemd_merkle_calc_digest_sub(zmd, node->kids[branch], md, (unsigned char *) node->digest);
+			if (!EVP_DigestUpdate(ctx, node->digest, EVP_MD_size(md)))
 				errx(1, "%s(%d): Digest update failed", __FILE__, __LINE__);
 		}
 	} else {
@@ -229,9 +218,9 @@ zonemd_merkle_calc_digest_sub(const zonemd *zmd, zonemd_tree *node, unsigned cha
 }
 
 void
-zonemd_merkle_calc_digest(const zonemd *zmd, unsigned char *buf)
+zonemd_merkle_calc_digest(const zonemd *zmd, const EVP_MD * md, unsigned char *buf)
 {
-	zonemd_merkle_calc_digest_sub(zmd, zmd->data, buf);
+	zonemd_merkle_calc_digest_sub(zmd, zmd->data, md, buf);
 }
 
 void

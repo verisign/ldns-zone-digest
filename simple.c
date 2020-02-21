@@ -8,24 +8,13 @@
 
 
 zonemd *
-zonemd_simple_new(uint8_t scheme, uint8_t hashalg)
+zonemd_simple_new(uint8_t scheme)
 {
-	const char *md_name;
 	zonemd *zmd;
-
-	if (hashalg == 1) {
-		md_name = "sha384";
-	} else {
-		return 0;
-	}
 
 	zmd = calloc(1, sizeof(*zmd));
 	assert(zmd);
 	zmd->scheme = scheme;
-	zmd->hashalg = hashalg;
-	zmd->md = EVP_get_digestbyname(md_name);
-	if (zmd->md == 0)
-		errx(1, "%s(%d): Unknown hash algorithm '%s'", __FILE__, __LINE__, md_name);
 	zmd->data = ldns_rr_list_new();
 	assert(zmd->data);
 	return zmd;
@@ -59,12 +48,12 @@ zonemd_simple_get_full_rr_list(const zonemd *zmd)
  * Calculate a digest over the zone.
  */
 void
-zonemd_simple_calc_digest(const zonemd *zmd, unsigned char *buf)
+zonemd_simple_calc_digest(const zonemd *zmd, const EVP_MD * md, unsigned char *buf)
 {
 	EVP_MD_CTX *ctx;
 	ctx = EVP_MD_CTX_create();
 	assert(ctx);
-	if (!EVP_DigestInit(ctx, zmd->md))
+	if (!EVP_DigestInit(ctx, md))
 		errx(1, "%s(%d): Digest init failed", __FILE__, __LINE__);
 	zonemd_rrlist_digest(zmd->data, ctx);
 	if (!EVP_DigestFinal_ex(ctx, buf, 0))

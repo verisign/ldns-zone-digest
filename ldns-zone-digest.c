@@ -734,9 +734,9 @@ do_calculate(const char *zsk_fname)
 		md_buf = calloc(1, md_len);
 		assert(md_buf);
 #if !ZONEMD_INCREMENTAL
-		zonemd_simple_calc_digest(the_zonemd, md_buf);
+		zonemd_simple_calc_digest(the_zonemd, md, md_buf);
 #else
-		zonemd_merkle_calc_digest(the_zonemd, md_buf);
+		zonemd_merkle_calc_digest(the_zonemd, md, md_buf);
 #endif
 		zonemd_rr_update_digest(zonemd_rr, md_buf, md_len);
 		free(md_buf);
@@ -783,9 +783,9 @@ do_verify(void)
 		md_buf = calloc(1, md_len);
 		assert(md_buf);
 #if !ZONEMD_INCREMENTAL
-		zonemd_simple_calc_digest(the_zonemd, md_buf);
+		zonemd_simple_calc_digest(the_zonemd, md, md_buf);
 #else
-		zonemd_merkle_calc_digest(the_zonemd, md_buf);
+		zonemd_merkle_calc_digest(the_zonemd, md, md_buf);
 #endif
 		if (memcmp(found_digest_buf, md_buf, md_len) != 0) {
 			fprintf(stderr, "Found and calculated digests for scheme:hashalg %u:%u do NOT match.\n", found_scheme, found_hashalg);
@@ -904,9 +904,9 @@ main(int argc, char *argv[])
 
 
 #if !ZONEMD_INCREMENTAL
-	the_zonemd = zonemd_simple_new(1, 1);
+	the_zonemd = zonemd_simple_new(1);
 #else
-	the_zonemd = zonemd_merkle_new(240, 1);
+	the_zonemd = zonemd_merkle_new(240);
 #endif
 	zonemd_read_zone(origin_str, input, 0, LDNS_RR_CLASS_IN);
         fclose(input);
