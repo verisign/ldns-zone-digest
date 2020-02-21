@@ -15,7 +15,7 @@ root.zone.signed: root.zone.placeholder
 	rm -fv $@_
 
 root.zone.placeholder: root.zone.unsigned
-	${ZONEHASH} -p 1 -o $@_ . root.zone.unsigned
+	${ZONEHASH} -p 1:1 -o $@_ . root.zone.unsigned
 	${READZONE} $@_ > $@
 	rm -fv $@_
 
