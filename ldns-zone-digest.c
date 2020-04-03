@@ -391,6 +391,13 @@ zonemd_rrlist_digest(ldns_rr_list *rrlist, EVP_MD_CTX *ctx)
 			if (my_typecovered(rr) == ZONEMD_RR_TYPE)
 				continue;
 		/*
+		 * Don't include ZONEMD RRs at apex
+		 */
+		if (ldns_rr_get_type(rr) == LDNS_RR_TYPE_ZONEMD)
+			if (ldns_dname_compare(ldns_rr_owner(rr), origin) == 0)
+				continue;
+#if 0
+		/*
 		 * For ZONEMD RRs at apex, create a copy with digest zeroized
 		 */
 		if (ldns_rr_get_type(rr) == LDNS_RR_TYPE_ZONEMD && ldns_dname_compare(ldns_rr_owner(rr), origin) == 0) {
@@ -410,6 +417,7 @@ zonemd_rrlist_digest(ldns_rr_list *rrlist, EVP_MD_CTX *ctx)
 			zonemd_rr_update_digest(rr_copy, 0, digest_len);	/* zero digest part */
 			rr = rr_copy;
 		}
+#endif
 #if DEBUG
 		char *s = ldns_rr2str(rr);
 		fdebugf(stderr, "%s(%d): zonemd_rrlist_digest RR#%u: %s", __FILE__, __LINE__, i, s);
