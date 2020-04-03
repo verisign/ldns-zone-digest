@@ -379,7 +379,7 @@ zonemd_rrlist_digest(ldns_rr_list *rrlist, EVP_MD_CTX *ctx)
 		if (prev && ldns_rr_compare(rr, prev) == 0) {
 			char *s = ldns_rr2str(rr);
 			assert(s);
-			warnx("%s(%d): Ignoring duplicate RR: %s\n", __FILE__, __LINE__, s);
+			warnx("%s(%d): Ignoring duplicate RR: %s", __FILE__, __LINE__, s);
 			free(s);
 			continue;
 		}
