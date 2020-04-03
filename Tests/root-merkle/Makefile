@@ -2,10 +2,10 @@ READZONE=ldns-read-zone
 ZONEHASH=../../ldns-zone-digest
 
 all: root.zone.hashed
-	${ZONEHASH} -v . root.zone.hashed 
+	${ZONEHASH} -s 240 -v . root.zone.hashed 
 
 root.zone.hashed: root.zone.signed
-	${ZONEHASH} -c -z Keys/K.+008+17913.private -o $@_ . root.zone.signed
+	${ZONEHASH} -s 240 -c -z Keys/K.+008+17913.private -o $@_ . root.zone.signed
 	${READZONE} $@_ > $@
 	rm -fv $@_
 
@@ -15,7 +15,7 @@ root.zone.signed: root.zone.placeholder
 	rm -fv $@_
 
 root.zone.placeholder: root.zone.unsigned
-	${ZONEHASH} -p 1:1 -o $@_ . root.zone.unsigned
+	${ZONEHASH} -p 240:1 -o $@_ . root.zone.unsigned
 	${READZONE} $@_ > $@
 	rm -fv $@_
 

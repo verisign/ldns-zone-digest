@@ -2,3 +2,5 @@ ldns-zone-digest
 ldns-zone-digest.o
 ldns-zone-digest-incremental
 ldns-zone-digest-incremental.o
+simple.o
+merkle.o
