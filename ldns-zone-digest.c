@@ -344,6 +344,8 @@ zonemd_digester(uint8_t hashalg, const char *file, const int line, bool warn_uns
 	const EVP_MD *md = 0;
 	if (hashalg == 1) {
 		name = "sha384";
+	} else if (hashalg == 2) {
+		name = "sha512";
 	} else {
 		if (warn_unsupported)
 			warnx("%s(%d): Unsupported hash algorithm %u", file, line, hashalg);
