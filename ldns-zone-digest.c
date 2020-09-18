@@ -212,6 +212,7 @@ zonemd_rr_unpack(ldns_rr *rr, uint32_t *ret_serial, uint8_t *ret_scheme, uint8_t
 		if (LDNS_RDF_TYPE_HEX != ldns_rdf_get_type(rdf))
 			errx(1, "%s(%d): %s RDF #4 expected type %u, but got type %u", __FILE__, __LINE__, RRNAME, LDNS_RDF_TYPE_HEX, ldns_rdf_get_type(rdf));
 		if (ret_digest) {
+			memset(ret_digest, 0, *ret_digest_sz);
 			assert(ret_digest_sz);
 			*ret_digest_sz = uimin(*ret_digest_sz, ldns_rdf_size(rdf));
 			memcpy(ret_digest, ldns_rdf_data(rdf), *ret_digest_sz);
@@ -783,6 +784,10 @@ do_verify(void)
 		unsigned int md_len = 0;
 		ldns_rr *zonemd_rr = ldns_rr_list_rr(zonemd_rr_list, i);
 		zonemd_rr_unpack(zonemd_rr, &found_serial, &found_scheme, &found_hashalg, found_digest_buf, &found_digest_len);
+		if (found_digest_len < 12) {
+			fprintf(stderr, "Ignoring digest of size %u, smaller than the minimum length 12\n", found_digest_len);
+			continue;
+		}
 		soa_serial_rdf = ldns_rr_rdf(the_soa, 2);
 		soa_serial = ldns_rdf2native_int32(soa_serial_rdf);
 		if (found_serial != soa_serial) {
@@ -794,6 +799,10 @@ do_verify(void)
 		md = zonemd_digester(found_hashalg, __FILE__, __LINE__, 1);
 		if (md == 0) {
 			fprintf(stderr, "Unable to verify unsupported hash algorithm %u\n", found_hashalg);
+			continue;
+		}
+		if (found_digest_len != EVP_MD_size(md)) {
+			fprintf(stderr, "Ignoring digest of size %u, expected size %d for alg %u\n", found_digest_len, EVP_MD_size(md), found_hashalg);
 			continue;
 		}
 		assert(EVP_MD_size(md) <= (int) sizeof(found_digest_buf));
