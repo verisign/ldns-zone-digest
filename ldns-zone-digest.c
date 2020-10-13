@@ -57,6 +57,7 @@ static int ldns_knows_about_zonemd = 0;
 const char *RRNAME = "ZONEMD";
 static ldns_rdf *origin = 0;
 ldns_rr *the_soa = 0;
+uint32_t the_soa_serial = 0;
 scheme *the_scheme = 0;
 
 #define MAX_ZONEMD_COUNT 10
@@ -251,14 +252,13 @@ zonemd_rr_unpack(ldns_rr *rr, uint32_t *ret_serial, uint8_t *ret_scheme, uint8_t
  * digest value is set to all zeroes.
  */
 void
-zonemd_rr_update_digest(ldns_rr * rr, unsigned char *new_digest_buf, unsigned int new_digest_len)
+zonemd_rr_update_digest(ldns_rr * rr, uint32_t serial, unsigned char *new_digest_buf, unsigned int new_digest_len)
 {
-	uint32_t serial = 0;
 	uint8_t scheme;
 	uint8_t hashalg;
         unsigned int old_digest_sz = EVP_MAX_MD_SIZE;
 	unsigned char old_digest_buf[EVP_MAX_MD_SIZE];
-	zonemd_rr_unpack(rr, &serial, &scheme, &hashalg, old_digest_buf, &old_digest_sz);
+	zonemd_rr_unpack(rr, 0, &scheme, &hashalg, old_digest_buf, &old_digest_sz);
 	zonemd_rr_pack(rr, serial, scheme, hashalg, new_digest_buf, new_digest_len);
 }
 
@@ -538,16 +538,11 @@ elapsed_msec(struct timeval *a, struct timeval *b)
 void
 zonemd_add_placeholders(placeholder placeholders[], unsigned int count)
 {
-	ldns_rdf *soa_serial_rdf = 0;
-	uint32_t soa_serial;
 	unsigned int i;
 
 	if (!quiet)
 		fprintf(stderr, "Remove existing ZONEMD RRset\n");
 	zonemd_remove_rr(ZONEMD_RR_TYPE, 0);
-
-	soa_serial_rdf = ldns_rr_rdf(the_soa, 2);
-	soa_serial = ldns_rdf2native_int32(soa_serial_rdf);
 
 	for (i = 0; i < count; i++) {
 		const EVP_MD *md = 0;
@@ -575,7 +570,7 @@ zonemd_add_placeholders(placeholder placeholders[], unsigned int count)
 		digest_buf = calloc(1, digest_len);
 		assert(digest_buf);
 		zonemd = zonemd_rr_create(ldns_rr_owner(the_soa), ldns_rr_ttl(the_soa));
-		zonemd_rr_pack(zonemd, soa_serial, placeholders[i].scheme, placeholders[i].hashalg, digest_buf, digest_len);
+		zonemd_rr_pack(zonemd, the_soa_serial, placeholders[i].scheme, placeholders[i].hashalg, digest_buf, digest_len);
 		free(digest_buf);
 		if (!quiet)
 			fprintf(stderr, "Add placeholder ZONEMD with scheme %u and hash algorithm %u\n",
@@ -598,6 +593,7 @@ zonemd_read_zone(const char *origin_str, FILE * fp, uint32_t ttl, ldns_rr_class 
 	ldns_status status;
 	ldns_rr_list *oldlist;
 	ldns_rr_list *tbflist;
+	ldns_rdf *soa_serial_rdf = 0;
 	unsigned int i;
 	unsigned int count = 0;
 
@@ -612,6 +608,8 @@ zonemd_read_zone(const char *origin_str, FILE * fp, uint32_t ttl, ldns_rr_class 
 		errx(1, "%s(%d): No SOA record in zone", __FILE__, __LINE__);
 	the_soa = ldns_rr_clone(ldns_zone_soa(zone));
 	zonemd_add_rr(the_soa);
+	soa_serial_rdf = ldns_rr_rdf(the_soa, 2);
+	the_soa_serial = ldns_rdf2native_int32(soa_serial_rdf);
 	count++;
 	/*
 	 * Remove any out-of-zone data
@@ -755,7 +753,7 @@ do_calculate(const char *zsk_fname)
 		md_buf = calloc(1, md_len);
 		assert(md_buf);
 		the_scheme->calc(the_scheme, md, md_buf);
-		zonemd_rr_update_digest(zonemd_rr, md_buf, md_len);
+		zonemd_rr_update_digest(zonemd_rr, the_soa_serial, md_buf, md_len);
 		free(md_buf);
 	}
 	if (zsk_fname)
@@ -777,8 +775,6 @@ do_verify(void)
 		unsigned char found_digest_buf[EVP_MAX_MD_SIZE];
 		unsigned int found_digest_len = EVP_MAX_MD_SIZE;
 		uint32_t found_serial = 0;
-		ldns_rdf *soa_serial_rdf = 0;
-		uint32_t soa_serial = 0;
 		const EVP_MD *md = 0;
 		unsigned char *md_buf = 0;
 		unsigned int md_len = 0;
@@ -788,10 +784,8 @@ do_verify(void)
 			fprintf(stderr, "Ignoring digest of size %u, smaller than the minimum length 12\n", found_digest_len);
 			continue;
 		}
-		soa_serial_rdf = ldns_rr_rdf(the_soa, 2);
-		soa_serial = ldns_rdf2native_int32(soa_serial_rdf);
-		if (found_serial != soa_serial) {
-			fprintf(stderr, "%s(%d): SOA serial (%u) does not match ZONEMD serial (%u)\n", __FILE__, __LINE__, soa_serial, found_serial);
+		if (found_serial != the_soa_serial) {
+			fprintf(stderr, "%s(%d): SOA serial (%u) does not match ZONEMD serial (%u)\n", __FILE__, __LINE__, the_soa_serial, found_serial);
 			continue;
 		}
 		if (!supported_scheme(found_scheme, __FILE__, __LINE__, 0))
