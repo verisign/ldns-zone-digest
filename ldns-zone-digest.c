@@ -466,6 +466,7 @@ zonemd_resign(ldns_rr_list * rrset, const char *zsk_fname)
 	assert(keys);
 	ldns_key_list_push_key(keys, zsk);
 
+	fprintf(stderr, "signing %d RRs with %d keys\n", ldns_rr_list_rr_count(rrset), ldns_key_list_key_count(keys));
 	rrsig = ldns_sign_public(rrset, keys);
 	if (rrsig == 0)
 		errx(1, "%s(%d): ldns_sign_public() failed", __FILE__, __LINE__);
@@ -737,7 +738,7 @@ do_calculate(const char *zsk_fname)
 {
 	ldns_rr_list *zonemd_rr_list = zonemd_rr_find();
 	unsigned int i;
-	if (!zonemd_rr_list)
+	if (!zonemd_rr_list || 0 == ldns_rr_list_rr_count(zonemd_rr_list))
 		errx(1, "%s(%d): No %s record found at zone apex.  Use -p to add one.", __FILE__, __LINE__, RRNAME);
 	for (i = 0; i < ldns_rr_list_rr_count(zonemd_rr_list); i++) {
 		uint8_t found_scheme = 0;
