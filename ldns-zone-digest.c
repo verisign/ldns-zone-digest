@@ -58,6 +58,8 @@ const char *RRNAME = "ZONEMD";
 static ldns_rdf *origin = 0;
 ldns_rr *the_soa = 0;
 uint32_t the_soa_serial = 0;
+ldns_output_format_storage ldns_rr_output_fmt_storage;
+ldns_output_format *ldns_rr_output_fmt = 0;
 scheme *the_scheme = 0;
 
 #define MAX_ZONEMD_COUNT 10
@@ -480,7 +482,7 @@ zonemd_write_zone_cb(const ldns_rr *rr, const void *cb_data)
 {
 	FILE *fp = (void *) cb_data;
 	if (rr)
-		ldns_rr_print(fp, rr);
+		ldns_rr_print_fmt(fp, ldns_rr_output_fmt, rr);
 }
 
 /*
@@ -503,6 +505,7 @@ usage(const char *p)
 {
 	fprintf(stderr, "usage: %s [options] origin [zonefile]\n", p);
 	fprintf(stderr, "\t-c\t\tcalculate the zone digest\n");
+	fprintf(stderr, "\t-g\t\tprint ZONEMD in RFC 3597 generic format\n");
 	fprintf(stderr, "\t-o file\t\twrite zone to output file\n");
 	fprintf(stderr, "\t-u file\t\tfile containing RR updates\n");
 	fprintf(stderr, "\t-p s,h\t\tinsert placeholder record of scheme s and hashalg h\n");
@@ -861,10 +864,15 @@ main(int argc, char *argv[])
 
 	OpenSSL_add_all_digests();
 
-	while ((ch = getopt(argc, argv, "co:p:qs:tu:vz:")) != -1) {
+	ldns_rr_output_fmt = ldns_output_format_init(&ldns_rr_output_fmt_storage);
+
+	while ((ch = getopt(argc, argv, "cgo:p:qs:tu:vz:")) != -1) {
 		switch (ch) {
 		case 'c':
 			calculate = 1;
+			break;
+		case 'g':
+			ldns_output_format_set_type(ldns_rr_output_fmt, ZONEMD_RR_TYPE);
 			break;
 		case 'o':
 			output_file = strdup(optarg);
