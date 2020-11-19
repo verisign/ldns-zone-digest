@@ -479,7 +479,7 @@ zonemd_resign(ldns_rr_list * rrset, const char *zsk_fname)
 }
 
 void
-zonemd_write_zone_cb(const ldns_rr *rr, const void *cb_data) 
+zonemd_write_zone_cb(const ldns_rr *rr, const void *cb_data)
 {
 	FILE *fp = (void *) cb_data;
 	if (rr)
@@ -511,7 +511,7 @@ usage(const char *p)
 	fprintf(stderr, "\t-u file\t\tfile containing RR updates\n");
 	fprintf(stderr, "\t-p s,h\t\tinsert placeholder record of scheme s and hashalg h\n");
 	fprintf(stderr, "\t-v\t\tverify the zone digest\n");
-	fprintf(stderr, "\t-z\t\tZSK file name\n");
+	fprintf(stderr, "\t-z file\t\tZSK file name\n");
 	fprintf(stderr, "\t-q\t\tquiet mode, show errors only\n");
 	exit(2);
 }
