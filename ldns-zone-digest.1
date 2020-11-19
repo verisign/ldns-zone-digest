@@ -1,0 +1,49 @@
+.TH ldns-zone-digest 1 "28 Oct 2018"
+.SH NAME
+ldns-zone-digest \- Implementation of Message Digests for DNS Zones
+.SH SYNOPSIS
+.B ldns-zone-digest
+.IR [-c]
+.IR [-g]
+.IR [-o file]
+.IR [-u file]
+.IR [-p s,h]
+.IR [-v]
+.IR [-z file]
+.IR [-q]
+
+.SH OPTIONS
+.TP
+\fB-c\fR
+calculate the zone digest
+.TP
+\fB-g\fR
+print ZONEMD in RFC 3597 generic format
+.TP
+\fB-o file\fR
+write zone to output file
+.TP
+\fB-u file\fR
+file containing RR updates
+.TP
+\fB-p s,h\fR
+insert placeholder record of scheme s and hashalg h
+.TP
+\fB-v\fR
+verify the zone digest
+.TP
+\fB-z file\fR
+ZSK file name
+.TP
+\fB-q\fR
+quiet mode, show errors only
+
+.SH DESCRIPTION
+.B ldns-zone-digest
+create or verify a Message Digests for DNS Zones
+
+.SH AUTHOR
+Written by Verisign / Duane Wessels
+
+.SH REPORTING BUGS
+Report bugs via https://github.com/verisign/ldns-zone-digest/issues
