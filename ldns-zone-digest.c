@@ -479,7 +479,7 @@ zonemd_resign(ldns_rr_list * rrset, const char *zsk_fname)
 }
 
 void
-zonemd_write_zone_cb(const ldns_rr *rr, const void *cb_data) 
+zonemd_write_zone_cb(const ldns_rr *rr, const void *cb_data)
 {
 	FILE *fp = (void *) cb_data;
 	if (rr)
