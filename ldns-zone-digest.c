@@ -428,6 +428,7 @@ zonemd_rrlist_digest(ldns_rr_list *rrlist, EVP_MD_CTX *ctx)
 		fdebugf(stderr, "%s(%d): zonemd_rrlist_digest RR#%u: %s", __FILE__, __LINE__, i, s);
 		free(s);
 #endif
+		ldns_rr2canonical(rr);
 		status = ldns_rr2wire(&wire_buf, rr, LDNS_SECTION_ANSWER, &sz);
 		if (status != LDNS_STATUS_OK)
 			errx(1, "%s(%d): ldns_rr2wire() failed", __FILE__, __LINE__);
