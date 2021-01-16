@@ -766,6 +766,37 @@ do_calculate(const char *zsk_fname)
 	ldns_rr_list_free(zonemd_rr_list);
 }
 
+/*
+ * The spec says to reject a found digest if its scheme and algorithm is repeated.
+ * This function returns true if a repeat is found, false if not.
+ */
+bool
+is_repeated_scheme_and_alg(uint8_t zonemd_scheme, uint8_t zonemd_hashalg, unsigned int found_index, ldns_rr_list *rr_list)
+{
+	unsigned int j;
+	for (j = 0; j < ldns_rr_list_rr_count(rr_list); j++) {
+		uint32_t other_serial;
+		uint8_t other_scheme;
+		uint8_t other_hashalg;
+		unsigned char other_digest_buf[EVP_MAX_MD_SIZE];
+		unsigned int other_digest_len = EVP_MAX_MD_SIZE;
+		if (found_index == j)
+			continue;
+		zonemd_rr_unpack(ldns_rr_list_rr(rr_list, j),
+			&other_serial,
+			&other_scheme,
+			&other_hashalg,
+			other_digest_buf,
+			&other_digest_len);
+		if (zonemd_scheme != other_scheme)
+			continue;
+		if (zonemd_hashalg != other_hashalg)
+			continue;
+		return 1;	/* found a duplicate */
+	}
+	return 0;
+}
+
 int
 do_verify(void)
 {
@@ -785,6 +816,11 @@ do_verify(void)
 		unsigned int md_len = 0;
 		ldns_rr *zonemd_rr = ldns_rr_list_rr(zonemd_rr_list, i);
 		zonemd_rr_unpack(zonemd_rr, &found_serial, &found_scheme, &found_hashalg, found_digest_buf, &found_digest_len);
+		if (is_repeated_scheme_and_alg(found_scheme, found_hashalg, i, zonemd_rr_list)) {
+			fprintf(stderr, "Ignoring repeated digest with scheme %u and algorithm %u\n",
+				found_scheme, found_hashalg);
+			continue;
+		}
 		if (found_digest_len < 12) {
 			fprintf(stderr, "Ignoring digest of size %u, smaller than the minimum length 12\n", found_digest_len);
 			continue;
