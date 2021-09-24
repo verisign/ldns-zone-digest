@@ -401,28 +401,6 @@ zonemd_rrlist_digest(ldns_rr_list *rrlist, EVP_MD_CTX *ctx)
 		if (ldns_rr_get_type(rr) == LDNS_RR_TYPE_ZONEMD)
 			if (ldns_dname_compare(ldns_rr_owner(rr), origin) == 0)
 				continue;
-#if 0
-		/*
-		 * For ZONEMD RRs at apex, create a copy with digest zeroized
-		 */
-		if (ldns_rr_get_type(rr) == LDNS_RR_TYPE_ZONEMD && ldns_dname_compare(ldns_rr_owner(rr), origin) == 0) {
-			uint8_t scheme = 0;
-			uint8_t hashalg = 0;
-			unsigned char digest[EVP_MAX_MD_SIZE];
-			unsigned int digest_len = EVP_MAX_MD_SIZE;
-			uint32_t serial = 0;
-			const EVP_MD *md = 0;
-			rr_copy = ldns_rr_clone(rr);
-			zonemd_rr_unpack(rr_copy, &serial, &scheme, &hashalg, digest, &digest_len);
-			md = zonemd_digester(hashalg, __FILE__, __LINE__, 0);
-			if (md != 0) {
-				assert(EVP_MD_size(md) <= (int) sizeof(digest));
-				digest_len = EVP_MD_size(md);
-			}
-			zonemd_rr_update_digest(rr_copy, 0, digest_len);	/* zero digest part */
-			rr = rr_copy;
-		}
-#endif
 #if DEBUG
 		char *s = ldns_rr2str(rr);
 		fdebugf(stderr, "%s(%d): zonemd_rrlist_digest RR#%u: %s", __FILE__, __LINE__, i, s);
