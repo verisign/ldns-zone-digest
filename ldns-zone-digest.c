@@ -350,6 +350,14 @@ zonemd_digester(uint8_t hashalg, const char *file, const int line, bool warn_uns
 		name = "sha384";
 	} else if (hashalg == 2) {
 		name = "sha512";
+	} else if (hashalg == 241) {
+		name = "sha384";
+		if (opt_nonce == 0)
+			opt_nonce = "Private Use Hash Alg 241";
+	} else if (hashalg == 242) {
+		name = "sha512";
+		if (opt_nonce == 0)
+			opt_nonce = "Private Use Hash Alg 242";
 	} else {
 		if (warn_unsupported)
 			warnx("%s(%d): Unsupported hash algorithm %u", file, line, hashalg);
