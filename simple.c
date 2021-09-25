@@ -62,6 +62,9 @@ scheme_simple_calc_digest(const scheme *s, const EVP_MD * md, unsigned char *buf
 	assert(ctx);
 	if (!EVP_DigestInit(ctx, md))
 		errx(1, "%s(%d): Digest init failed", __FILE__, __LINE__);
+	if (opt_nonce)
+		if (!EVP_DigestUpdate(ctx, opt_nonce, strlen(opt_nonce)))
+			errx(1, "%s(%d): Digest update failed", __FILE__, __LINE__);
 	zonemd_rrlist_digest(s->data, ctx);
 	if (!EVP_DigestFinal_ex(ctx, buf, 0))
 		errx(1, "%s(%d): Digest final failed", __FILE__, __LINE__);

@@ -28,3 +28,5 @@ struct _scheme {
 	scheme_free *free;
 	void *data;
 };
+
+extern char *opt_nonce;

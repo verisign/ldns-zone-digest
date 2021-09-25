@@ -61,6 +61,7 @@ uint32_t the_soa_serial = 0;
 ldns_output_format_storage ldns_rr_output_fmt_storage;
 ldns_output_format *ldns_rr_output_fmt = 0;
 scheme *the_scheme = 0;
+char *opt_nonce = 0;
 
 #define MAX_ZONEMD_COUNT 10
 typedef struct  {
@@ -882,7 +883,7 @@ main(int argc, char *argv[])
 
 	ldns_rr_output_fmt = ldns_output_format_init(&ldns_rr_output_fmt_storage);
 
-	while ((ch = getopt(argc, argv, "cgo:p:qs:tu:vz:")) != -1) {
+	while ((ch = getopt(argc, argv, "cgo:p:qs:tu:vz:N:")) != -1) {
 		switch (ch) {
 		case 'c':
 			calculate = 1;
@@ -928,6 +929,9 @@ main(int argc, char *argv[])
 			break;
 		case 'z':
 			zsk_fname = strdup(optarg);
+			break;
+		case 'N':
+			opt_nonce = strdup(optarg);
 			break;
 		default:
 			usage(progname);
