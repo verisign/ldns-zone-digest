@@ -501,6 +501,8 @@ usage(const char *p)
 	fprintf(stderr, "\t-v\t\tverify the zone digest\n");
 	fprintf(stderr, "\t-z file\t\tZSK file name\n");
 	fprintf(stderr, "\t-q\t\tquiet mode, show errors only\n");
+	fprintf(stderr, "\t-t\t\tprint timing data\n");
+	fprintf(stderr, "\t-N string\tSeed digest with nonce string\n");
 	exit(2);
 }
 
