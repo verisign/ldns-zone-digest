@@ -187,7 +187,7 @@ scheme_merkle_iterate(const scheme *s, const scheme_iterate_cb cb, const void *c
 }
 
 static void
-scheme_merkle_calc_digest_sub(const scheme *s, merkle_tree *node, const EVP_MD * md, unsigned char *buf)
+scheme_merkle_calc_digest_sub(const scheme *s, merkle_tree *node, const EVP_MD * md, unsigned char *buf, const char *nonce)
 {
 	EVP_MD_CTX *ctx;
 	//fdebugf(stderr, "%s(%d): scheme_calc_digest depth %u branch %u\n", __FILE__, __LINE__, node->depth,
@@ -199,13 +199,16 @@ scheme_merkle_calc_digest_sub(const scheme *s, merkle_tree *node, const EVP_MD *
 	assert(ctx);
 	if (!EVP_DigestInit(ctx, md))
 		errx(1, "%s(%d): Digest init failed", __FILE__, __LINE__);
+        if (nonce)
+                if (!EVP_DigestUpdate(ctx, nonce, strlen(nonce)))
+                        errx(1, "%s(%d): Digest update failed", __FILE__, __LINE__);
 	if (merkle_tree_max_depth > node->depth) {
 		unsigned int branch;
 		assert(node->kids);
 		for (branch = 0; branch < merkle_tree_max_width; branch++) {
 			if (node->kids[branch] == 0)
 				continue;
-			scheme_merkle_calc_digest_sub(s, node->kids[branch], md, (unsigned char *) node->digest);
+			scheme_merkle_calc_digest_sub(s, node->kids[branch], md, (unsigned char *) node->digest, 0);
 			if (!EVP_DigestUpdate(ctx, node->digest, EVP_MD_size(md)))
 				errx(1, "%s(%d): Digest update failed", __FILE__, __LINE__);
 		}
@@ -221,9 +224,9 @@ scheme_merkle_calc_digest_sub(const scheme *s, merkle_tree *node, const EVP_MD *
 }
 
 void
-scheme_merkle_calc_digest(const scheme *s, const EVP_MD * md, unsigned char *buf)
+scheme_merkle_calc_digest(const scheme *s, const EVP_MD * md, unsigned char *buf, const char *nonce)
 {
-	scheme_merkle_calc_digest_sub(s, s->data, md, buf);
+	scheme_merkle_calc_digest_sub(s, s->data, md, buf, nonce);
 }
 
 void

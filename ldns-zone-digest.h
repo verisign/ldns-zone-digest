@@ -16,7 +16,7 @@ typedef void (*scheme_iterate_cb)(const ldns_rr *, const void *scheme_iterate_da
 
 typedef scheme *(scheme_new)(uint8_t);
 typedef ldns_rr_list *(scheme_get_leaf_rr_list)(const struct _scheme *, const ldns_rr *for_rr);
-typedef void (scheme_calc_digest)(const struct _scheme *, const EVP_MD * md, unsigned char *buf);
+typedef void (scheme_calc_digest)(const struct _scheme *, const EVP_MD * md, unsigned char *buf, const char *nonce);
 typedef void (scheme_iterate)(const struct _scheme *, scheme_iterate_cb, const void *scheme_iterate_data);
 typedef void (scheme_free)(struct _scheme *);
 
@@ -28,5 +28,3 @@ struct _scheme {
 	scheme_free *free;
 	void *data;
 };
-
-extern char *opt_nonce;

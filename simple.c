@@ -55,7 +55,7 @@ scheme_simple_iterate(const scheme *s, const scheme_iterate_cb cb, const void *c
  * Calculate a digest over the zone.
  */
 void
-scheme_simple_calc_digest(const scheme *s, const EVP_MD * md, unsigned char *buf)
+scheme_simple_calc_digest(const scheme *s, const EVP_MD * md, unsigned char *buf, const char *opt_nonce)
 {
 	EVP_MD_CTX *ctx;
 	ctx = EVP_MD_CTX_create();

@@ -61,7 +61,7 @@ uint32_t the_soa_serial = 0;
 ldns_output_format_storage ldns_rr_output_fmt_storage;
 ldns_output_format *ldns_rr_output_fmt = 0;
 scheme *the_scheme = 0;
-char *opt_nonce = 0;
+char *opt_nonce[256];
 
 #define MAX_ZONEMD_COUNT 10
 typedef struct  {
@@ -352,12 +352,12 @@ zonemd_digester(uint8_t hashalg, const char *file, const int line, bool warn_uns
 		name = "sha512";
 	} else if (hashalg == 241) {
 		name = "sha384";
-		if (opt_nonce == 0)
-			opt_nonce = "Private Use Hash Alg 241";
+		if (opt_nonce[hashalg] == 0)
+			opt_nonce[hashalg] = "Private Use Hash Alg 241";
 	} else if (hashalg == 242) {
 		name = "sha512";
-		if (opt_nonce == 0)
-			opt_nonce = "Private Use Hash Alg 242";
+		if (opt_nonce[hashalg] == 0)
+			opt_nonce[hashalg] = "Private Use Hash Alg 242";
 	} else {
 		if (warn_unsupported)
 			warnx("%s(%d): Unsupported hash algorithm %u", file, line, hashalg);
@@ -746,7 +746,7 @@ do_calculate(const char *zsk_fname)
 		md_len = EVP_MD_size(md);
 		md_buf = calloc(1, md_len);
 		assert(md_buf);
-		the_scheme->calc(the_scheme, md, md_buf);
+		the_scheme->calc(the_scheme, md, md_buf, opt_nonce[found_hashalg]);
 		zonemd_rr_update_digest(zonemd_rr, the_soa_serial, md_buf, md_len);
 		free(md_buf);
 	}
@@ -833,7 +833,7 @@ do_verify(void)
 		md_len = EVP_MD_size(md);
 		md_buf = calloc(1, md_len);
 		assert(md_buf);
-		the_scheme->calc(the_scheme, md, md_buf);
+		the_scheme->calc(the_scheme, md, md_buf, opt_nonce[found_hashalg]);
 		if (memcmp(found_digest_buf, md_buf, md_len) != 0) {
 			fprintf(stderr, "Found and calculated digests for scheme:hashalg %u:%u do NOT match.\n", found_scheme, found_hashalg);
 			zonemd_print_digest(stderr, "Found     : ", found_digest_buf, md_len, "\n");
@@ -888,6 +888,7 @@ main(int argc, char *argv[])
 	if (0 == progname)
 		progname = argv[0];
 	memset(placeholders, 0, sizeof(placeholders));
+	memset(opt_nonce, 0, sizeof(opt_nonce));
 
 	OpenSSL_add_all_digests();
 
@@ -941,7 +942,22 @@ main(int argc, char *argv[])
 			zsk_fname = strdup(optarg);
 			break;
 		case 'N':
-			opt_nonce = strdup(optarg);
+			if (strlen(optarg)) {
+				char *p;
+				uint8_t hashalg = 0;
+				p = strtok(optarg, ":/");
+				if (0 == p) {
+					warnx("%s(%d): bad -N arg", __FILE__, __LINE__);
+					usage(progname);
+				}
+				hashalg = strtoul(p, 0, 10);
+				p = strtok(0, "");
+				if (0 == p) {
+					warnx("%s(%d): bad -N arg", __FILE__, __LINE__);
+					usage(progname);
+				}
+				opt_nonce[hashalg] = strdup(p);
+			}
 			break;
 		default:
 			usage(progname);
