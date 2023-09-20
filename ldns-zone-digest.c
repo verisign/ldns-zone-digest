@@ -62,6 +62,7 @@ ldns_output_format_storage ldns_rr_output_fmt_storage;
 ldns_output_format *ldns_rr_output_fmt = 0;
 scheme *the_scheme = 0;
 char *opt_nonce[256];
+uint32_t opt_override_serial = 0;
 
 #define MAX_ZONEMD_COUNT 10
 typedef struct  {
@@ -604,6 +605,8 @@ zonemd_read_zone(const char *origin_str, FILE * fp, uint32_t ttl, ldns_rr_class 
 	zonemd_add_rr(the_soa);
 	soa_serial_rdf = ldns_rr_rdf(the_soa, 2);
 	the_soa_serial = ldns_rdf2native_int32(soa_serial_rdf);
+	if (opt_override_serial)
+		the_soa_serial = opt_override_serial;
 	count++;
 	/*
 	 * Remove any out-of-zone data
@@ -896,7 +899,7 @@ main(int argc, char *argv[])
 
 	ldns_rr_output_fmt = ldns_output_format_init(&ldns_rr_output_fmt_storage);
 
-	while ((ch = getopt(argc, argv, "cgo:p:qs:tu:vz:N:")) != -1) {
+	while ((ch = getopt(argc, argv, "cgo:p:qs:tu:vz:N:S:")) != -1) {
 		switch (ch) {
 		case 'c':
 			calculate = 1;
@@ -960,6 +963,9 @@ main(int argc, char *argv[])
 				}
 				opt_nonce[hashalg] = strdup(p);
 			}
+			break;
+		case 'S':
+			opt_override_serial = strtoul(optarg, 0, 10);
 			break;
 		default:
 			usage(progname);
