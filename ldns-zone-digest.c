@@ -859,6 +859,8 @@ probe_ldns(const char *origin_str)
 	if (LDNS_STATUS_OK == status) {
 		ldns_knows_about_zonemd = 1;
 		ZONEMD_RR_TYPE = ldns_rr_get_type(rr);
+	} else {
+		fprintf(stderr, "ldns library doesn't support native ZONEMD RR\n");
 	}
 	ldns_rdf_deep_free(origin);
 	if (rr)
