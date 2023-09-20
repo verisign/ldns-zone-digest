@@ -957,11 +957,7 @@ main(int argc, char *argv[])
 				}
 				hashalg = strtoul(p, 0, 10);
 				p = strtok(0, "");
-				if (0 == p) {
-					warnx("%s(%d): bad -N arg", __FILE__, __LINE__);
-					usage(progname);
-				}
-				opt_nonce[hashalg] = strdup(p);
+				opt_nonce[hashalg] = strdup(p ? p : "");
 			}
 			break;
 		case 'S':
