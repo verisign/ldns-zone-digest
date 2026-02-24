@@ -294,20 +294,58 @@ zonemd_add_rr(ldns_rr *rr)
 }
 
 /*
- * zonemd_remove_rr()
+ * Remove an RR from an RR list by swapping.
+ * Return true if there was a swap, or false if the last in the list was removed
+ */
+bool
+zonemd_remove_rr_from_rrlist(ldns_rr_list *rrlist, ldns_rr *rr, unsigned int i)
+{
+	/*
+	 * swap the last RR in the list with the current RR to be removed
+	 */
+	bool swapped = 0;
+	ldns_rr *last = ldns_rr_list_pop_rr(rrlist);
+	assert(last);
+	if (last != rr) {
+		ldns_rr *t = ldns_rr_list_set_rr(rrlist, last, i);
+		assert(t == rr);
+		swapped = 1;
+	}
+	ldns_rr_free(rr);
+	return swapped;
+}
+
+/*
+ * zonemd_del_rr()
+ *
+ * Delete an RR from the zone data.
+ */
+void
+zonemd_del_rr(ldns_rr *find)
+{
+	unsigned int i;
+	ldns_rr_list *rrlist = the_scheme->leaf(the_scheme, find);
+	assert(rrlist);
+	for (i = 0; i < ldns_rr_list_rr_count(rrlist); i++) {
+		ldns_rr *rr = ldns_rr_list_rr(rrlist, i);
+		if (ldns_rr_compare(rr, find) == 0) {
+			zonemd_remove_rr_from_rrlist(rrlist, rr, i);
+			break;
+		}
+	}
+}
+
+/*
+ * zonemd_remove_apex_rr()
  *
  * Remove RRs of type 'type' from the zone apex.  If 'type' is RRISG then
  * signatures of type 'covered' are removed.
  */
 void
-zonemd_remove_rr(ldns_rr_type type, ldns_rr_type covered)
+zonemd_remove_apex_rr(ldns_rr_type type, ldns_rr_type covered)
 {
 	unsigned int i;
 	ldns_rr_list *rrlist = 0;
-	ldns_rr_list *tbd = 0;
-
-	tbd = ldns_rr_list_new();
-	assert(tbd);
 
 	rrlist = the_scheme->leaf(the_scheme, the_soa);
 	assert(rrlist);
@@ -320,21 +358,10 @@ zonemd_remove_rr(ldns_rr_type type, ldns_rr_type covered)
 		} else if (type == LDNS_RR_TYPE_RRSIG && my_typecovered(rr) != covered) {
 			(void) 0;
 		} else {
-			/*
-			 * swap the last RR in the list with the current RR to be removed
-			 */
-			ldns_rr *last = ldns_rr_list_pop_rr(rrlist);
-			assert(last);
-			ldns_rr_list_push_rr(tbd, rr);
-			if (last != rr) {
-				ldns_rr *t = ldns_rr_list_set_rr(rrlist, last, i);
-				assert(t == rr);
+			if (zonemd_remove_rr_from_rrlist(rrlist, rr, i))
 				i--;
-			}
 		}
 	}
-
-	ldns_rr_list_deep_free(tbd);
 }
 
 /*
@@ -460,7 +487,7 @@ zonemd_resign(ldns_rr_list * rrset, const char *zsk_fname)
 	if (rrsig == 0)
 		errx(1, "%s(%d): ldns_sign_public() failed", __FILE__, __LINE__);
 
-	zonemd_remove_rr(LDNS_RR_TYPE_RRSIG, ZONEMD_RR_TYPE);
+	zonemd_remove_apex_rr(LDNS_RR_TYPE_RRSIG, ZONEMD_RR_TYPE);
 	for (i = 0; i < ldns_rr_list_rr_count(rrsig); i++)
 		zonemd_add_rr(ldns_rr_list_rr(rrsig, i));
 	ldns_key_list_free(keys);
@@ -537,7 +564,7 @@ zonemd_add_placeholders(placeholder placeholders[], unsigned int count)
 
 	if (!quiet)
 		fprintf(stderr, "Remove existing ZONEMD RRset\n");
-	zonemd_remove_rr(ZONEMD_RR_TYPE, 0);
+	zonemd_remove_apex_rr(ZONEMD_RR_TYPE, 0);
 
 	for (i = 0; i < count; i++) {
 		const EVP_MD *md = 0;
@@ -691,6 +718,7 @@ zonemd_zone_update(const char *update_file)
 			n_add++;
 		} else if (0 == strcmp(cmd, "del")) {
 			n_del++;
+			zonemd_del_rr(rr);
 		} else {
 			warnx("%s(%d): zonemd_zone_update: %s line %u expected 'add' or 'del'", __FILE__, __LINE__, update_file, line);
 			continue;
