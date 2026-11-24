@@ -73,7 +73,9 @@ merkle_tree_get_leaf_by_name_sub(const scheme *s, merkle_tree * node, const char
 			if (node->depth == 0) {
 				snprintf(node->kids[branch]->branch_str, sizeof(node->kids[branch]->branch_str), "%u", branch);
 			} else {
-				char *t = node->branch_str;
+				char t[100];
+				t[99] = 0;
+				strncpy(t, node->branch_str, 99);
 				snprintf(node->kids[branch]->branch_str, sizeof(node->kids[branch]->branch_str), "%s %u", t, branch);
 			}
 		}
